@@ -1,0 +1,5 @@
+hako-serve
+hako-serve-asan
+*.o
+*.dSYM/
+.DS_Store

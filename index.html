@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>hako</title>
+<style>
+	:root {
+		--bg:      #131209;
+		--panel:   #191710;
+		--panel-2: #201d15;
+		--line:    #2e2a20;
+		--line-2:  #3b362a;
+		--bone:    #c8c2b2;
+		--gold:    #b89656;
+		--gold-dim:#8a7040;
+		--phos:    #7a8a3a;
+		--dim:     #6d685c;
+		--faint:   #4c483f;
+		--err:     #b5563f;
+		--ink:     #17150e;
+		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		--sidebar: 250px;
+	}
+	* { box-sizing: border-box; }
+	html, body { height: 100%; margin: 0; }
+	body {
+		background: var(--bg); color: var(--bone);
+		font: 14px/1.55 var(--mono);
+		display: flex; overflow: hidden;
+		-webkit-font-smoothing: antialiased;
+	}
+	::-webkit-scrollbar { width: 9px; height: 9px; }
+	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
+	::-webkit-scrollbar-track { background: transparent; }
+
+	aside {
+		width: var(--sidebar); flex: none; background: var(--panel);
+		border-right: 1px solid var(--line); display: flex; flex-direction: column;
+		padding-top: env(safe-area-inset-top);
+	}
+	aside .sec { padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
+	.label {
+		font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+		color: var(--faint); margin-bottom: .35rem;
+	}
+	.dirline { display: flex; gap: .4rem; font-size: 12px; word-break: break-all; }
+	.dirline .path { flex: 1; color: var(--gold); }
+	.sessions { flex: 1; overflow-y: auto; padding: .4rem; }
+	.sess {
+		display: block; width: 100%; text-align: left; background: transparent;
+		border: 1px solid transparent; color: var(--bone); font: inherit; font-size: 12px;
+		padding: .4rem .5rem; border-radius: 3px; cursor: pointer;
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+	.sess:hover { background: var(--panel-2); border-color: var(--line); }
+	.sess.cur { border-color: var(--gold-dim); color: var(--gold); }
+	.sess .when { display: block; color: var(--faint); font-size: 10px; }
+	.sessrow { display: flex; align-items: stretch; gap: .2rem; }
+	.sessrow .sess { flex: 1; min-width: 0; }
+	/* Always visible, dim until hovered — discoverable without hunting for them. */
+	.sessrow .act {
+		flex: none; border: 1px solid transparent; background: transparent;
+		color: var(--faint); padding: 0 .4rem; font-size: 13px; line-height: 1;
+	}
+	.sessrow .act:hover { border-color: var(--line); }
+	.sessrow .act.ren:hover { color: var(--gold); }
+	.sessrow .act.del:hover { color: var(--err); }
+
+	.thinking { color: var(--gold); margin: 0 0 1rem; }
+	.thinking .frame { display: inline-block; width: 1.2em; }
+	.thinking .elapsed { color: var(--faint); }
+	.sidefoot { padding: .5rem; border-top: 1px solid var(--line); display: flex; gap: .4rem; flex-wrap: wrap; }
+
+	button {
+		font: inherit; cursor: pointer; border-radius: 3px; background: transparent;
+		color: var(--bone); border: 1px solid var(--line-2); padding: .3rem .6rem; font-size: 12px;
+	}
+	button:hover { border-color: var(--gold-dim); color: var(--gold); }
+	button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+	button.primary { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 600; }
+	button.primary:hover { filter: brightness(1.1); color: var(--ink); }
+	button:disabled { opacity: .35; cursor: default; }
+
+	main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+	header {
+		display: flex; align-items: center; gap: .55rem; padding: .5rem .8rem;
+		padding-top: max(.5rem, env(safe-area-inset-top));
+		border-bottom: 1px solid var(--line); background: var(--panel); flex: none;
+	}
+	header .burger { display: none; }
+	header .mark { color: var(--gold); font-weight: 700; letter-spacing: .09em; }
+	header .dot { color: var(--err); font-size: 11px; }
+	header .dot.on { color: var(--phos); }
+	header .meta { margin-left: auto; color: var(--dim); font-size: 12px; text-align: right; }
+	header .meta b { color: var(--bone); font-weight: 400; }
+
+	#log { flex: 1 1 auto; overflow-y: auto; padding: 1rem .9rem 1.4rem; -webkit-overflow-scrolling: touch; }
+	.turn { margin: 0 0 1rem; white-space: pre-wrap; word-break: break-word; }
+	.turn .who { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: .25rem; }
+	.user .who { color: var(--gold); }
+	.model .who { color: var(--faint); }
+	.system { color: var(--dim); }
+	.error { color: var(--err); }
+	.tool {
+		color: var(--phos); border-left: 2px solid var(--line-2); padding-left: .6rem;
+		margin: 0 0 .7rem; font-size: 13px; white-space: pre-wrap; word-break: break-word;
+	}
+	.ask { border: 1px solid var(--gold-dim); border-radius: 4px; background: var(--panel); padding: .65rem; margin: 0 0 .9rem; }
+	.ask .head { color: var(--gold); }
+	.ask .subj { display: block; color: var(--dim); margin: .2rem 0 .6rem; word-break: break-all; white-space: pre-wrap; }
+	.ask .row { display: flex; flex-wrap: wrap; gap: .4rem; }
+	.ask.settled { border-color: var(--line); opacity: .75; }
+	.ask.settled .row { display: none; }
+	.ask .verdict { color: var(--dim); font-size: 12px; }
+
+	form {
+		flex: none; display: flex; gap: .5rem; padding: .6rem;
+		padding-bottom: max(.6rem, env(safe-area-inset-bottom));
+		border-top: 1px solid var(--line); background: var(--panel);
+	}
+	textarea {
+		flex: 1; resize: none; min-height: 2.6rem; max-height: 9rem; padding: .5rem .6rem;
+		font: inherit; color: var(--bone); background: var(--bg);
+		border: 1px solid var(--line-2); border-radius: 3px;
+	}
+	textarea:focus { outline: none; border-color: var(--gold); }
+
+	.scrim {
+		position: fixed; inset: 0; background: rgba(4,4,2,.74); display: flex;
+		align-items: center; justify-content: center; padding: 1rem; z-index: 20;
+	}
+	.modal {
+		background: var(--panel); border: 1px solid var(--gold-dim); border-radius: 4px;
+		width: min(620px, 100%); max-height: 84vh; display: flex; flex-direction: column;
+	}
+	.modal h2 {
+		margin: 0; padding: .6rem .75rem; font-size: 11px; letter-spacing: .14em;
+		text-transform: uppercase; color: var(--gold); border-bottom: 1px solid var(--line);
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+	.modal .body { overflow-y: auto; padding: .45rem; }
+	.modal .foot { padding: .5rem; border-top: 1px solid var(--line); display: flex; gap: .4rem; align-items: center; }
+	.modal .foot .grow { flex: 1; }
+	.modal input {
+		width: 100%; font: inherit; color: var(--bone); background: var(--bg);
+		border: 1px solid var(--line-2); border-radius: 3px; padding: .4rem .5rem;
+	}
+	.modal input:focus { outline: none; border-color: var(--gold); }
+	.opt {
+		display: block; width: 100%; text-align: left; border: 1px solid transparent;
+		background: transparent; color: var(--bone); font: inherit; padding: .4rem .55rem;
+		border-radius: 3px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+	.opt:hover, .opt.sel { background: var(--panel-2); border-color: var(--gold-dim); color: var(--gold); }
+	.opt .tag { color: var(--phos); font-size: 11px; }
+	.opt .sub { color: var(--faint); font-size: 11px; }
+	.grouplabel {
+		font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+		color: var(--faint); padding: .55rem .55rem .2rem;
+	}
+	.note { color: var(--dim); font-size: 12px; padding: .55rem; line-height: 1.6; }
+	.note b { color: var(--bone); font-weight: 400; }
+	.note code { color: var(--gold); }
+	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+
+	@media (max-width: 720px) {
+		aside {
+			position: fixed; inset: 0 auto 0 0; z-index: 30; transform: translateX(-100%);
+			transition: transform .16s ease; box-shadow: 0 0 40px rgba(0,0,0,.6);
+		}
+		body.nav aside { transform: none; }
+		header .burger { display: inline-block; }
+	}
+</style>
+</head>
+<body>
+
+<aside id="side">
+	<div class="sec">
+		<div class="label">working directory</div>
+		<div class="dirline"><span class="path" id="dir">…</span></div>
+		<div style="margin-top:.45rem; display:flex; gap:.4rem;">
+			<button id="btn-dir">open folder…</button>
+			<button id="btn-settings">settings</button>
+		</div>
+	</div>
+	<div class="label" style="padding:.6rem .7rem 0">sessions here</div>
+	<div class="sessions" id="sessions"></div>
+	<div class="sidefoot">
+		<button id="btn-new">new session</button>
+		<button id="btn-restart" title="Restart the agent process — frees a wedged :login">restart</button>
+	</div>
+</aside>
+
+<main>
+	<header>
+		<button class="burger" id="burger">☰</button>
+		<span class="mark">hako</span>
+		<span class="dot" id="dot">●</span>
+		<span class="meta" id="meta">connecting…</span>
+	</header>
+	<div id="log"></div>
+	<form id="form">
+		<textarea id="input" rows="1" placeholder="ask, or :slash" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+		<button class="primary" id="send" type="submit">send</button>
+	</form>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $('log'), meta = $('meta'), dot = $('dot'), form = $('form');
+const input = $('input'), send = $('send'), sessionsEl = $('sessions'), dirEl = $('dir');
+
+/* ---------- settings: on this device only, never sent anywhere ---------- */
+const SETTINGS_KEY = 'hako.studio.settings';
+const defaults = { theme: 'mithraeum', modelPaths: [], consented: false, spinner: 'braille' };
+let settings = Object.assign({}, defaults);
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
+function saveSettings() {
+	try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+
+/* ---------- themes: applied in the page, instantly ---------- */
+const THEMES = {
+	mithraeum: { bg:'#131209', panel:'#191710', 'panel-2':'#201d15', line:'#2e2a20', 'line-2':'#3b362a',
+	             bone:'#c8c2b2', gold:'#b89656', 'gold-dim':'#8a7040', phos:'#7a8a3a',
+	             dim:'#6d685c', faint:'#4c483f', err:'#b5563f', ink:'#17150e' },
+	claude:    { bg:'#1a1614', panel:'#221d1a', 'panel-2':'#2b2421', line:'#362e29', 'line-2':'#453b34',
+	             bone:'#e8e3dd', gold:'#d97757', 'gold-dim':'#a35a41', phos:'#8fa876',
+	             dim:'#8a7f77', faint:'#5f564f', err:'#c9584a', ink:'#1a1614' },
+	nord:      { bg:'#2e3440', panel:'#333b49', 'panel-2':'#3b4252', line:'#434c5e', 'line-2':'#4c566a',
+	             bone:'#e5e9f0', gold:'#88c0d0', 'gold-dim':'#5e81ac', phos:'#a3be8c',
+	             dim:'#8794a8', faint:'#667487', err:'#bf616a', ink:'#2e3440' },
+	mono:      { bg:'#101010', panel:'#171717', 'panel-2':'#1f1f1f', line:'#2b2b2b', 'line-2':'#3a3a3a',
+	             bone:'#d6d6d6', gold:'#ededed', 'gold-dim':'#8a8a8a', phos:'#b8b8b8',
+	             dim:'#8a8a8a', faint:'#5c5c5c', err:'#c06a6a', ink:'#101010' }
+};
+function applyTheme(name) {
+	const t = THEMES[name] || THEMES.mithraeum;
+	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
+	settings.theme = name;
+	saveSettings();
+}
+applyTheme(settings.theme);
+
+/* ---------- state ---------- */
+let busy = false;
+let state = { provider: '', model: '', turns: 0, session: '', dir: '' };
+const askBoxes = new Map();
+
+function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); }
+function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
+function add(cls, who, text) {
+	const stick = atBottom();
+	const el = document.createElement('div');
+	el.className = cls;
+	if (who) {
+		const w = document.createElement('span');
+		w.className = 'who'; w.textContent = who; el.appendChild(w);
+	}
+	el.appendChild(document.createTextNode(text));
+	if (spinEl) log.insertBefore(el, spinEl);   /* keep the spinner last */
+	else log.appendChild(el);
+	if (stick) log.scrollTop = log.scrollHeight;
+	return el;
+}
+function renderMeta() {
+	meta.textContent = '';
+	if (state.provider) {
+		const b = document.createElement('b');
+		b.textContent = state.provider + (state.model ? '/' + state.model : '');
+		meta.appendChild(b);
+	}
+	if (state.turns) meta.appendChild(document.createTextNode(' · turn ' + state.turns));
+	if (!meta.textContent) meta.textContent = 'ready';
+}
+/* ---------- thinking indicator ----------
+   A local turn can run for minutes with nothing streamed back, so without this
+   the page looks dead. Elapsed time is the part that actually reassures. */
+const SPINNERS = {
+	braille: ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'],
+	dots:    ['·  ','·· ','···',' ··','  ·','   '],
+	bar:     ['▁','▃','▄','▅','▆','▇','▆','▅','▄','▃'],
+	moon:    ['◐','◓','◑','◒'],
+	arc:     ['◜','◝','◞','◟'],
+	none:    null
+};
+let spinTimer = null, spinEl = null, spinStart = 0;
+
+function startThinking() {
+	if (spinEl) return;
+	const frames = SPINNERS[settings.spinner];
+	const stick = atBottom();
+	spinEl = document.createElement('div');
+	spinEl.className = 'thinking';
+	const f = document.createElement('span');
+	f.className = 'frame';
+	const label = document.createTextNode(' thinking ');
+	const t = document.createElement('span');
+	t.className = 'elapsed';
+	spinEl.append(f, label, t);
+	log.appendChild(spinEl);
+	if (stick) log.scrollTop = log.scrollHeight;
+
+	spinStart = Date.now();
+	let i = 0;
+	const tick = () => {
+		if (!spinEl) return;
+		if (frames) f.textContent = frames[i++ % frames.length];
+		const s = Math.floor((Date.now() - spinStart) / 1000);
+		t.textContent = s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's';
+	};
+	tick();
+	spinTimer = setInterval(tick, frames ? 90 : 1000);
+}
+function stopThinking() {
+	if (spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+	if (spinEl) { spinEl.remove(); spinEl = null; }
+}
+function setBusy(v) {
+	busy = v;
+	send.disabled = v;
+	send.textContent = v ? '…' : 'send';
+	if (v) startThinking(); else stopThinking();
+}
+
+/* hako announces provider/model changes in its normal output:
+     "provider: anthropic (saved)"
+     "model: claude-sonnet-4-6 (saved)"
+     "model → claude-haiku-4-5 (prior model not valid for anthropic…)"
+   Read the real values off the stream rather than assuming what we asked for
+   stuck — a provider switch can silently reassign the model. */
+function sniffState(text) {
+	let m, hit = false;
+	if ((m = text.match(/^provider:\s*([^\s(]+)/))) { state.provider = m[1]; hit = true; }
+	if ((m = text.match(/^model:\s*([^\s(]+)/)))    { state.model = m[1];    hit = true; }
+	if ((m = text.match(/^model\s*→\s*([^\s(]+)/))) { state.model = m[1];    hit = true; }
+	if (hit) renderMeta();
+	return hit;
+}
+async function post(path, body) {
+	try { return await fetch(path, { method: 'POST', body }); }
+	catch (e) { add('turn error', '', 'send failed: ' + e.message); setBusy(false); }
+}
+
+/* ---------- generic modal ---------- */
+function modal(title) {
+	const scrim = document.createElement('div');
+	scrim.className = 'scrim';
+	const box = document.createElement('div');
+	box.className = 'modal';
+	const h = document.createElement('h2');
+	h.textContent = title;
+	const body = document.createElement('div');
+	body.className = 'body';
+	const foot = document.createElement('div');
+	foot.className = 'foot';
+	box.append(h, body, foot);
+	scrim.appendChild(box);
+	const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+	function onKey(e) { if (e.key === 'Escape') close(); }
+	document.addEventListener('keydown', onKey);
+	scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+	document.body.appendChild(scrim);
+	return { scrim, box, title: h, body, foot, close };
+}
+function optionRow(label, sub, tag, onClick, current) {
+	const b = document.createElement('button');
+	b.className = 'opt' + (current ? ' sel' : '');
+	b.appendChild(document.createTextNode((current ? '◎ ' : '  ') + label));
+	if (tag) {
+		const s = document.createElement('span');
+		s.className = 'tag'; s.textContent = '  ' + tag; b.appendChild(s);
+	}
+	if (sub) {
+		const s = document.createElement('span');
+		s.className = 'sub'; s.textContent = '  ' + sub; b.appendChild(s);
+	}
+	b.addEventListener('click', onClick);
+	return b;
+}
+function groupLabel(text) {
+	const d = document.createElement('div');
+	d.className = 'grouplabel'; d.textContent = text;
+	return d;
+}
+function mb(label, cls, fn) {
+	const b = document.createElement('button');
+	if (cls) b.className = cls;
+	b.textContent = label;
+	b.addEventListener('click', fn);
+	return b;
+}
+const fmtGB = (n) => (n / 1073741824).toFixed(1) + ' GB';
+
+/* ---------- approvals ---------- */
+const ALWAYS_LABEL = { write: 'always write in this project', shell: 'always run exactly this', read: 'always read in this project' };
+const VERDICT = { y: 'allowed once', n: 'denied', a: 'allowed for this session' };
+
+function askApproval(m) {
+	const stick = atBottom();
+	const box = document.createElement('div');
+	box.className = 'ask';
+	const head = document.createElement('span');
+	head.className = 'head'; head.textContent = '● ' + (m.name || 'tool');
+	const subj = document.createElement('span');
+	subj.className = 'subj'; subj.textContent = m.subject || '';
+	const row = document.createElement('div');
+	row.className = 'row';
+	const mk = (cls, label, ans) => row.appendChild(mb(label, cls, () => { settle(box, ans); post('/api/approve', ans); }));
+	mk('primary', 'allow once', 'y');
+	mk('', 'deny', 'n');
+	mk('', ALWAYS_LABEL[m.kind] || 'always allow', 'a');
+	box.append(head, subj, row);
+	log.appendChild(box);
+	if (m.id) askBoxes.set(String(m.id), box);
+	if (stick) log.scrollTop = log.scrollHeight;
+}
+function settle(box, ans) {
+	box.classList.add('settled');
+	const v = document.createElement('span');
+	v.className = 'verdict'; v.textContent = VERDICT[ans] || ans;
+	box.appendChild(v);
+}
+
+/* ---------- catalog capture (cloud model / provider lists) ----------
+   The singular :model/:provider/:theme commands open a blocking terminal picker
+   that reads stdin; over the bridge that swallows the user's next message. So
+   the UI asks with the safe plural form and sends only explicit arguments. */
+let capture = null;
+function listThenPick(cmd, kind, title, apply) {
+	capture = { kind, items: [], title, apply };
+	post('/api/slash', cmd);
+	setTimeout(() => { if (capture && capture.kind === kind) finishCapture(); }, 4000);
+}
+function finishCapture() {
+	if (!capture) return;
+	const c = capture; capture = null;
+	const m = modal(c.title);
+	c.items.forEach((it) => m.body.appendChild(optionRow(it.label, '', '', () => { m.close(); c.apply(it.value); }, it.current)));
+	if (!c.items.length) m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no options returned — type one below' }));
+	const inp = document.createElement('input');
+	inp.placeholder = 'or type an id and press enter';
+	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) { m.close(); c.apply(inp.value.trim()); } });
+	const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
+	m.foot.append(g, mb('cancel', '', m.close));
+	inp.focus();
+}
+function captureLine(text) {
+	if (!capture) return false;
+	if (/^\s*$/.test(text)) return true;
+	if (/to select|to see all|models for|^providers?:|^available/i.test(text)) return true;
+	const m = text.match(/^\s*([◎●*>]\s*)?(\S+)\s*$/);
+	if (m) capture.items.push({ label: m[2], value: m[2], current: !!m[1] });
+	return true;
+}
+
+/* ---------- model picker ---------- */
+function setModel(id, localModel) {
+	/* Provider first: switching providers resets the model in hako. */
+	if (localModel && state.provider !== 'mithraeum') {
+		post('/api/slash', ':provider mithraeum');
+		state.provider = 'mithraeum';
+	}
+	post('/api/slash', ':model ' + id);
+	state.model = id;                 /* optimistic — hako emits no state event */
+	renderMeta();
+}
+async function openModelPicker() {
+	const m = modal('model');
+	m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'loading…' }));
+	let j = { installed: [], found: [], known: [] };
+	try {
+		const r = await fetch('/api/models?search=' + encodeURIComponent(settings.modelPaths.join(',')));
+		j = await r.json();
+	} catch (e) {}
+	m.body.textContent = '';
+
+	if (j.installed.length) {
+		m.body.appendChild(groupLabel('local — installed'));
+		j.installed.forEach((x) => m.body.appendChild(
+			optionRow(x.id, fmtGB(x.bytes), 'ready', () => { m.close(); setModel(x.id, true); }, x.id === state.model)));
+	}
+	const installedIds = new Set(j.installed.map((x) => x.id));
+	const found = (j.found || []).filter((x) => !installedIds.has(x.id));
+	if (found.length) {
+		m.body.appendChild(groupLabel('found on this device — link to use'));
+		found.forEach((x) => m.body.appendChild(
+			optionRow(x.id, x.path, 'link', async () => {
+				m.close();
+				add('turn system', '', 'linking ' + x.id + ' from ' + x.path);
+				const r = await post('/api/link', x.path);
+				if (r && r.ok) setModel(x.id, true);
+				else add('turn error', '', 'could not link ' + x.path);
+			})));
+	}
+	const missing = (j.known || []).filter((id) => !installedIds.has(id) && !found.some((f) => f.id === id));
+	if (missing.length) {
+		m.body.appendChild(groupLabel('available to download'));
+		missing.forEach((id) => m.body.appendChild(
+			optionRow(id, 'from huggingface.co/mithraeum', 'pull', () => {
+				m.close();
+				add('turn system', '', 'downloading ' + id + ' — this is a multi-GB transfer and runs on this machine.');
+				post('/api/slash', ':pull ' + id);
+			})));
+	}
+	m.body.appendChild(groupLabel('cloud'));
+	m.body.appendChild(optionRow('browse this provider’s catalog…', '', '', () => {
+		m.close();
+		listThenPick(':models list', 'model', 'model', (v) => { post('/api/slash', ':model ' + v); state.model = v; renderMeta(); });
+	}));
+
+	const inp = document.createElement('input');
+	inp.placeholder = 'or type a model id';
+	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) { m.close(); setModel(inp.value.trim(), false); } });
+	const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
+	m.foot.append(g, mb('cancel', '', m.close));
+}
+
+/* ---------- folder picker ---------- */
+function consentNotice(onOk) {
+	if (settings.consented) return onOk();
+	const m = modal('before you open a folder');
+	const n = document.createElement('div');
+	n.className = 'note';
+	n.innerHTML =
+		'<b>The agent gets read and write access to the folder you choose.</b> It can create, ' +
+		'modify and delete files there, and every one of those actions asks your permission first ' +
+		'unless you pick “always”.<br><br>' +
+		'<b>Nothing is stored by us.</b> There is no account and no server holding your data. ' +
+		'Your files stay on this machine. Conversations and settings are written to ' +
+		'<code>~/.hako/</code> and your browser’s local storage on this device — the same ' +
+		'files the hako CLI uses, which is why sessions are shared between them.<br><br>' +
+		'What you send to a <b>cloud</b> model does go to that provider, using your own API key.';
+	m.body.appendChild(n);
+	m.foot.append(document.createElement('div'), mb('cancel', '', m.close), mb('understood', 'primary', () => {
+		settings.consented = true; saveSettings(); m.close(); onOk();
+	}));
+	m.foot.firstChild.className = 'grow';
+}
+
+function openFolderPicker() {
+	consentNotice(async () => {
+		const m = modal('open folder');
+		let path = state.dir || '.';
+
+		const draw = async (p) => {
+			m.body.textContent = '';
+			let j;
+			try {
+				const r = await fetch('/api/dirs?path=' + encodeURIComponent(p));
+				j = await r.json();
+			} catch (e) {
+				m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'cannot read ' + p }));
+				return;
+			}
+			path = j.path;
+			m.title.textContent = path;
+			if (path !== '/') m.body.appendChild(optionRow('../', '', '', () => draw(path.replace(/\/[^/]+$/, '') || '/')));
+			(j.dirs || []).sort().forEach((d) =>
+				m.body.appendChild(optionRow(d + '/', '', '', () => draw(path === '/' ? '/' + d : path + '/' + d))));
+			if (!(j.dirs || []).length) m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: '(no subfolders)' }));
+		};
+
+		const inp = document.createElement('input');
+		inp.placeholder = 'or type an absolute path';
+		inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) draw(inp.value.trim()); });
+		const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
+		m.foot.append(g, mb('cancel', '', m.close), mb('open this folder', 'primary', async () => {
+			m.close();
+			clearLog();
+			add('turn system', '', 'opening ' + path + ' …');
+			await post('/api/open', path);
+			state.session = '';
+			await loadSessions();
+		}));
+		await draw(path);
+	});
+}
+
+/* ---------- settings ---------- */
+function openSettings() {
+	const m = modal('settings');
+
+	m.body.appendChild(groupLabel('theme'));
+	Object.keys(THEMES).forEach((name) => {
+		const t = THEMES[name];
+		const b = optionRow(name, '', '', () => {
+			applyTheme(name);
+			post('/api/slash', ':theme ' + name);   /* keep the CLI in step */
+			m.close(); openSettings();
+		}, settings.theme === name);
+		['bg', 'gold', 'phos', 'bone'].reverse().forEach((k) => {
+			const sw = document.createElement('span');
+			sw.className = 'swatch';
+			sw.style.background = t[k];
+			b.insertBefore(sw, b.firstChild);
+		});
+		m.body.appendChild(b);
+	});
+
+	m.body.appendChild(groupLabel('thinking indicator'));
+	Object.keys(SPINNERS).forEach((name) => {
+		const f = SPINNERS[name];
+		m.body.appendChild(optionRow(name, f ? f.slice(0, 5).join(' ') : 'no animation', '', () => {
+			settings.spinner = name; saveSettings();
+			m.close(); openSettings();
+		}, settings.spinner === name));
+	});
+
+	m.body.appendChild(groupLabel('where to look for model weights'));
+	const note = document.createElement('div');
+	note.className = 'note';
+	note.innerHTML = '<code>~/.hako/models</code> and <code>~/Downloads</code> are always searched. ' +
+	                 'Add folders here — a weight found elsewhere is <b>symlinked</b> into place, never copied or moved.';
+	m.body.appendChild(note);
+	settings.modelPaths.forEach((p, i) => {
+		m.body.appendChild(optionRow(p, '', 'remove', () => {
+			settings.modelPaths.splice(i, 1); saveSettings(); m.close(); openSettings();
+		}));
+	});
+	const addWrap = document.createElement('div');
+	addWrap.style.padding = '.35rem .55rem';
+	const addInp = document.createElement('input');
+	addInp.placeholder = 'add a folder path, press enter';
+	addInp.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' && addInp.value.trim()) {
+			settings.modelPaths.push(addInp.value.trim()); saveSettings(); m.close(); openSettings();
+		}
+	});
+	addWrap.appendChild(addInp);
+	m.body.appendChild(addWrap);
+
+	m.body.appendChild(groupLabel('your data'));
+	const priv = document.createElement('div');
+	priv.className = 'note';
+	priv.innerHTML = 'These settings live in this browser’s local storage, on this device. ' +
+	                 'Conversations live in <code>~/.hako/projects/</code> on the machine running the agent. ' +
+	                 'We keep nothing — there is no account and no server-side copy.';
+	m.body.appendChild(priv);
+	m.body.appendChild(optionRow('forget settings on this device', '', '', () => {
+		try { localStorage.removeItem(SETTINGS_KEY); } catch (e) {}
+		settings = Object.assign({}, defaults);
+		applyTheme(settings.theme);
+		m.close();
+	}));
+
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('done', 'primary', m.close));
+}
+
+/* ---------- resume ----------
+   `:resume` reloads the conversation into hako's context but replays nothing to
+   the front end, so the pane would come back empty. Render the stored transcript
+   ourselves — it's the same jsonl the CLI reads. */
+async function renderHistory(id) {
+	try {
+		const r = await fetch('/api/history?id=' + encodeURIComponent(id));
+		const j = await r.json();
+		(j.messages || []).forEach((msg) => {
+			const text = msg.content || '';
+			if (!text) return;
+			if (msg.role === 'user') add('turn user', 'you', text);
+			else if (msg.role === 'assistant') add('turn model', 'hako', text);
+			else add('turn system', '', text);
+		});
+		if ((j.messages || []).length) {
+			const sep = add('turn system', '', '── end of saved history ──');
+			sep.style.color = 'var(--faint)';
+		}
+		log.scrollTop = log.scrollHeight;
+	} catch (e) { add('turn error', '', 'could not load history for ' + id); }
+}
+async function resumeSession(id) {
+	clearLog();
+	state.session = id;             /* pre-set so the init event doesn't wipe the render */
+	await post('/api/slash', ':resume ' + id);
+	await post('/api/reset', '');   /* the transcript is on screen; drop stale replay */
+	await renderHistory(id);
+	loadSessions();
+}
+
+/* Rename writes a `<sid>.title` sidecar next to the transcript — hako's own jsonl
+   is never touched, so the CLI keeps reading it unchanged. Empty name restores
+   the first-message default. */
+function renameSession(s) {
+	const m = modal('rename session');
+	const n = document.createElement('div');
+	n.className = 'note';
+	n.textContent = 'Give this conversation a name. Leave it empty to go back to using its first message.';
+	m.body.appendChild(n);
+
+	const wrap = document.createElement('div');
+	wrap.style.padding = '.35rem .55rem';
+	const inp = document.createElement('input');
+	inp.value = s.title || '';
+	inp.maxLength = 200;
+	wrap.appendChild(inp);
+	m.body.appendChild(wrap);
+
+	const apply = async () => {
+		m.close();
+		const r = await post('/api/session/rename', s.id + '\n' + inp.value.trim());
+		if (r && r.ok) loadSessions();
+		else add('turn error', '', 'could not rename ' + s.id);
+	};
+	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('cancel', '', m.close), mb('save', 'primary', apply));
+	setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+
+/* Deleting a transcript removes a real file from disk — confirm, and say where. */
+function confirmDelete(s) {
+	const m = modal('delete session');
+	const n = document.createElement('div');
+	n.className = 'note';
+	n.textContent = 'Delete "' + (s.title || s.id) + '"?\n\nThis removes ' + s.id +
+		'.jsonl from ~/.hako/projects/ on this machine. It cannot be undone, and the ' +
+		'hako CLI will no longer see it either.';
+	n.style.whiteSpace = 'pre-wrap';
+	m.body.appendChild(n);
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('keep it', '', m.close), mb('delete', 'primary', async () => {
+		m.close();
+		const r = await post('/api/session/delete', s.id);
+		if (r && r.ok) {
+			if (s.id === state.session) { clearLog(); post('/api/slash', ':session new'); }
+			loadSessions();
+		} else add('turn error', '', 'could not delete ' + s.id);
+	}));
+}
+
+/* ---------- sidebar ---------- */
+function when(ts) {
+	const d = new Date(ts * 1000), now = Date.now() / 1000;
+	if (now - ts < 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+async function loadSessions() {
+	try {
+		const r = await fetch('/api/sessions');
+		const j = await r.json();
+		state.dir = j.dir || '';
+		dirEl.textContent = state.dir;
+		sessionsEl.textContent = '';
+		(j.sessions || []).sort((a, b) => b.mtime - a.mtime).forEach((s) => {
+			const row = document.createElement('div');
+			row.className = 'sessrow';
+
+			const b = document.createElement('button');
+			b.className = 'sess' + (s.id === state.session ? ' cur' : '');
+			b.title = s.id;
+			b.textContent = s.title || '(empty)';
+			const w = document.createElement('span');
+			w.className = 'when';
+			w.textContent = s.id.slice(0, 8) + ' · ' + when(s.mtime);
+			b.appendChild(w);
+			b.addEventListener('click', () => resumeSession(s.id));
+
+			const ren = document.createElement('button');
+			ren.className = 'act ren';
+			ren.title = 'rename this session';
+			ren.textContent = '✎';
+			ren.addEventListener('click', (e) => { e.stopPropagation(); renameSession(s); });
+
+			const del = document.createElement('button');
+			del.className = 'act del';
+			del.title = 'delete this session';
+			del.textContent = '×';
+			del.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete(s); });
+
+			row.append(b, ren, del);
+			sessionsEl.appendChild(row);
+		});
+		if (!(j.sessions || []).length)
+			sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no sessions in this folder yet' }));
+	} catch (e) {}
+}
+
+/* ---------- event stream ---------- */
+const es = new EventSource('/api/events');
+es.onopen = () => { dot.classList.add('on'); clearLog(); renderMeta(); };
+es.onerror = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
+es.onmessage = (ev) => {
+	let m;
+	try { m = JSON.parse(ev.data); } catch (e) { return; }
+
+	if (m.session && m.session !== state.session) {
+		if (state.session) { clearLog(); post('/api/reset', ''); }
+		state.session = m.session;
+		loadSessions();
+	}
+	switch (m.type) {
+		case 'init':
+			state.provider = m.provider || ''; state.model = m.model || ''; state.turns = m.turns || 0;
+			renderMeta(); loadSessions();
+			break;
+		case 'message':
+			if (m.role === 'user') { add('turn user', 'you', m.text || ''); setBusy(true); break; }
+			if (m.role === 'system') {
+				sniffState(m.text || '');                       /* always watch for state lines */
+				if (captureLine(m.text || '')) break;           /* harvested into an open picker */
+				add('turn system', '', m.text || '');
+			} else {
+				add('turn model', 'hako', m.text || '');
+			}
+			break;
+		case 'tool_request': askApproval(m); break;
+		case 'tool_decision': {
+			const box = askBoxes.get(String(m.id));
+			if (box && !box.classList.contains('settled')) settle(box, m.answer);
+			break;
+		}
+		case 'tool_start': add('tool', '', '→ ' + (m.display || 'tool')); break;
+		case 'tool_end':   add('tool', '', '← ' + (m.display || 'done')); break;
+		case 'done':
+			state.turns = m.turn || state.turns;
+			renderMeta(); setBusy(false);
+			if (capture) finishCapture();
+			loadSessions();
+			break;
+		case 'error': add('turn error', '', m.text || 'error'); setBusy(false); break;
+	}
+};
+
+/* ---------- input ---------- */
+const UNSAFE = /^[:/](model|provider|theme)\s*$/i;
+const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
+
+form.addEventListener('submit', (e) => {
+	e.preventDefault();
+	const text = input.value.trim();
+	if (!text || busy) return;
+	input.value = ''; input.style.height = 'auto';
+
+	if (UNSAFE.test(text)) {
+		const which = text.replace(/^[:/]/, '').trim().toLowerCase();
+		if (which === 'theme') openSettings();
+		else if (which === 'model') openModelPicker();
+		else listThenPick(':providers', 'provider', 'provider', (v) => {
+			post('/api/slash', ':provider ' + v);
+			state.provider = v; state.model = ''; renderMeta();
+		});
+		return;
+	}
+	setBusy(true);
+	if (text.startsWith(':') || text.startsWith('/')) {
+		post('/api/slash', text);
+		if (CLEARING.test(text)) { clearLog(); post('/api/reset', ''); setBusy(false); }
+	} else post('/api/prompt', text);
+});
+
+input.addEventListener('keydown', (e) => {
+	if (e.key === 'Enter' && !e.shiftKey && window.matchMedia('(hover: hover)').matches) {
+		e.preventDefault(); form.requestSubmit();
+	}
+});
+input.addEventListener('input', () => {
+	input.style.height = 'auto';
+	input.style.height = Math.min(input.scrollHeight, 144) + 'px';
+});
+
+$('burger').addEventListener('click', () => document.body.classList.toggle('nav'));
+$('btn-dir').addEventListener('click', openFolderPicker);
+$('btn-settings').addEventListener('click', openSettings);
+$('btn-new').addEventListener('click', () => { clearLog(); post('/api/slash', ':session new'); post('/api/reset', ''); });
+$('btn-restart').addEventListener('click', async () => {
+	clearLog(); add('turn system', '', 'restarting agent…');
+	await post('/api/restart', ''); setBusy(false);
+});
+
+loadSessions();
+</script>
+</body>
+</html>
