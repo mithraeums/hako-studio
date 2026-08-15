@@ -1,0 +1,11 @@
+# The image builds the wasm itself; sending build outputs would only shadow it.
+# hako.c is deliberately NOT excluded: `make docker` stages a local checkout
+# there so the container can build an unreleased agent.
+dist/
+hako.wasm
+
+# Not part of a container build.
+ios/
+.github/
+.git/
+.DS_Store
