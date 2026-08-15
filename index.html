@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#131209">
+<!-- Added to the home screen, this runs chromeless — which is the point: the
+     phone is meant to be a real client, not a page you visit. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="hako">
+<!-- Real resources, not data: URIs — iOS ignores a data URI for a touch icon.
+     Both are served by the binary out of the same embedded bundle. -->
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>hako</title>
 <style>
 	:root {
@@ -30,7 +42,15 @@
 		font: 14px/1.55 var(--mono);
 		display: flex; overflow: hidden;
 		-webkit-font-smoothing: antialiased;
+		-webkit-text-size-adjust: 100%;   /* Safari inflates text in landscape otherwise */
+		overscroll-behavior: none;
 	}
+	/* Dynamic viewport unit, because a mobile browser's chrome resizes the window:
+	   100% leaves the composer under the URL bar. --vh is set from visualViewport
+	   for the keyboard case, which no CSS unit tracks. */
+	@supports (height: 100dvh) { html, body { height: 100dvh; } }
+	body.kb { height: var(--vh, 100dvh); }
+	button, .sess, .opt { touch-action: manipulation; }   /* no double-tap zoom */
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
 	::-webkit-scrollbar-track { background: transparent; }
@@ -107,6 +127,12 @@
 		color: var(--phos); border-left: 2px solid var(--line-2); padding-left: .6rem;
 		margin: 0 0 .7rem; font-size: 13px; white-space: pre-wrap; word-break: break-word;
 	}
+	/* Tool output: quieter than the chip that announced it, but readable. */
+	.tool.result {
+		color: var(--bone); background: var(--panel); border-left-color: var(--gold-dim);
+		padding: .5rem .6rem; margin: -.3rem 0 .8rem; max-height: 15rem; overflow: auto;
+		font-size: 12.5px;
+	}
 	.ask { border: 1px solid var(--gold-dim); border-radius: 4px; background: var(--panel); padding: .65rem; margin: 0 0 .9rem; }
 	.ask .head { color: var(--gold); }
 	.ask .subj { display: block; color: var(--dim); margin: .2rem 0 .6rem; word-break: break-all; white-space: pre-wrap; }
@@ -114,6 +140,31 @@
 	.ask.settled { border-color: var(--line); opacity: .75; }
 	.ask.settled .row { display: none; }
 	.ask .verdict { color: var(--dim); font-size: 12px; }
+
+	/* Attachments sit above the composer, as chips you can drop individually —
+	   the same shape every chat app uses, because it is the one people know. */
+	.tray {
+		flex: none; display: flex; flex-wrap: wrap; gap: .35rem;
+		padding: .5rem .6rem 0; background: var(--panel);
+		border-top: 1px solid var(--line);
+	}
+	.chip {
+		display: inline-flex; align-items: center; gap: .4rem; max-width: 100%;
+		border: 1px solid var(--line-2); border-radius: 3px; background: var(--bg);
+		color: var(--bone); font-size: 12px; padding: .25rem .5rem;
+	}
+	.chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.chip .rm { color: var(--faint); cursor: pointer; border: 0; background: none; font: inherit; padding: 0 .1rem; }
+	.chip .rm:hover { color: var(--err); }
+	.pending {
+		flex: none; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--gold-dim);
+		background: var(--panel-2); color: var(--gold); font: inherit; font-size: 12px;
+		padding: .5rem .7rem; cursor: pointer;
+	}
+	.pending:hover { background: var(--panel); color: var(--gold); }
+	.attach { flex: none; font-size: 17px; line-height: 1; padding: .3rem .55rem; color: var(--dim); }
+	.attach:hover { color: var(--gold); }
+	.turn a, .system a { color: var(--gold); }
 
 	form {
 		flex: none; display: flex; gap: .5rem; padding: .6rem;
@@ -163,15 +214,57 @@
 	.note { color: var(--dim); font-size: 12px; padding: .55rem; line-height: 1.6; }
 	.note b { color: var(--bone); font-weight: 400; }
 	.note code { color: var(--gold); }
+	/* Breadcrumbs: every ancestor one tap away, wrapping on narrow screens. */
+	/* Full-screen picker: sticky path, big rows, sticky action bar. */
+	.modal.sheet { width: min(760px, 100%); height: 92dvh; max-height: 92dvh; }
+	.modal.sheet .body { flex: 1; }
+	.modal.sheet .opt { padding: .7rem .6rem; font-size: 14px; }
+	.modal.sheet .crumbs {
+		position: sticky; top: 0; z-index: 2; background: var(--panel);
+		border-bottom: 1px solid var(--line); margin: -.45rem -.45rem .35rem;
+		padding: .5rem .55rem;
+	}
+	.crumbs { display: flex; flex-wrap: wrap; gap: .15rem; padding: .1rem .2rem .45rem; }
+	.crumb {
+		border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+		font: inherit; font-size: 11px; padding: .2rem .45rem; border-radius: 3px; cursor: pointer;
+	}
+	.crumb:hover { color: var(--gold); border-color: var(--gold-dim); }
+	.places { border-bottom: 1px solid var(--line); margin-bottom: .35rem; padding-bottom: .5rem; }
+	.crumb.place { color: var(--gold); border-color: var(--gold-dim); }
 	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+
+	/* Fingers, not cursors: hover styling never fires, so every target has to be
+	   big enough to hit and legible without it. */
+	@media (pointer: coarse) {
+		button { padding: .5rem .7rem; min-height: 40px; }
+		.sessrow .act { min-width: 42px; color: var(--dim); }
+		.opt { padding: .6rem .55rem; }
+		.sess { padding: .55rem .5rem; }
+	}
 
 	@media (max-width: 720px) {
 		aside {
-			position: fixed; inset: 0 auto 0 0; z-index: 30; transform: translateX(-100%);
-			transition: transform .16s ease; box-shadow: 0 0 40px rgba(0,0,0,.6);
+			position: fixed; inset: 0 auto 0 0; z-index: 30; width: min(84vw, 320px);
+			transform: translateX(-100%); transition: transform .16s ease;
+			box-shadow: 0 0 40px rgba(0,0,0,.6);
+			padding-left: env(safe-area-inset-left);
+			padding-bottom: env(safe-area-inset-bottom);
 		}
 		body.nav aside { transform: none; }
+		body.nav::after {                      /* tap-anywhere-else closes the drawer */
+			content: ''; position: fixed; inset: 0; z-index: 29; background: rgba(4,4,2,.55);
+		}
 		header .burger { display: inline-block; }
+		header { padding-left: max(.8rem, env(safe-area-inset-left)); }
+		header .meta { font-size: 11px; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		#log { padding: .8rem .7rem 1rem; }
+		.tray { padding-left: max(.6rem, env(safe-area-inset-left)); }
+		form { padding-left: max(.6rem, env(safe-area-inset-left)); padding-right: max(.6rem, env(safe-area-inset-right)); }
+		/* Under 16px, iOS zooms the page on focus and never zooms back. */
+		textarea, .modal input { font-size: 16px; }
+		.modal { width: 100%; max-height: 88dvh; }
+		.scrim { padding: .5rem; align-items: flex-end; }
 	}
 </style>
 </head>
@@ -182,15 +275,17 @@
 		<div class="label">working directory</div>
 		<div class="dirline"><span class="path" id="dir">…</span></div>
 		<div style="margin-top:.45rem; display:flex; gap:.4rem;">
-			<button id="btn-dir">open folder…</button>
+			<button id="btn-dir">browse…</button>
 			<button id="btn-settings">settings</button>
 		</div>
 	</div>
+	<div class="label" style="padding:.6rem .7rem 0">files here</div>
+	<div class="sessions" id="files"></div>
 	<div class="label" style="padding:.6rem .7rem 0">sessions here</div>
 	<div class="sessions" id="sessions"></div>
 	<div class="sidefoot">
 		<button id="btn-new">new session</button>
-		<button id="btn-restart" title="Restart the agent process — frees a wedged :login">restart</button>
+		<button id="btn-restart" title="Reload this folder — fresh session state, same agent">reload</button>
 	</div>
 </aside>
 
@@ -202,16 +297,450 @@
 		<span class="meta" id="meta">connecting…</span>
 	</header>
 	<div id="log"></div>
+	<div id="tray" class="tray" hidden></div>
 	<form id="form">
+		<button id="attach" type="button" class="attach" title="attach a file">+</button>
 		<textarea id="input" rows="1" placeholder="ask, or :slash" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
 		<button class="primary" id="send" type="submit">send</button>
 	</form>
 </main>
 
 <script>
+/* ---------- wasm mode ----------
+   Two carriers, one UI. When a `hako --serve` backend is present the page talks
+   to it over HTTP, exactly as before. When there is no backend — the hosted site,
+   a USB stick, an offline tab — the same agent runs here as WebAssembly in a
+   worker, and this shim answers the same /api/* calls locally. The UI does not
+   know the difference, which is the point: one front end, three shells.
+
+   The worker runs one agent instance per turn. State lives in OPFS, so sessions
+   and credentials persist between turns exactly as files do natively. */
+/* `make site` stamps this on the hosted bundle. The native binary serves the
+   same file without it, so one page really is one page. */
+const HAKO_WASM_MODE = document.querySelector('meta[name="hako-mode"]')?.content === 'wasm';
+
+if (HAKO_WASM_MODE) {
+	const worker = new Worker('hako-worker.js', { type: 'module' });
+	const ring = [];                       /* events, so a late listener sees them */
+	let listeners = [];
+	let booted = false;
+
+	const emit = (obj) => {
+		ring.push(obj);
+		listeners.forEach((fn) => fn(obj));
+	};
+
+	let config = { provider: '', model: '', has_key: false };
+	let configReady = null;
+	const whenConfig = new Promise((r) => { configReady = r; });
+	const WORKSPACE = '/workspace';   /* the one visible root in the browser build */
+	let workDir = WORKSPACE;
+	let curSession = '';
+	let folderName = '';
+	let agentVersion = '';
+
+	/* A directory handle is a live object, not a path; IndexedDB is the only
+	   place that can store one. */
+	const idb = (fn) => new Promise((resolve) => {
+		const rq = indexedDB.open('hako', 1);
+		rq.onupgradeneeded = () => rq.result.createObjectStore('handles');
+		rq.onerror = () => resolve(null);
+		rq.onsuccess = () => {
+			const db = rq.result;
+			const tx = db.transaction('handles', 'readwrite');
+			const r = fn(tx.objectStore('handles'));
+			if (r) { r.onsuccess = () => resolve(r.result); r.onerror = () => resolve(null); }
+			else resolve(null);
+		};
+	});
+	const rememberFolder = (h) => idb((st) => st.put(h, 'folder'));
+	const recallFolder = () => idb((st) => st.get('folder'));
+	const forgetFolder = () => idb((st) => st.delete('folder'));
+
+	async function mountFolder(handle) {
+		const r = await ask('mount', { handle });
+		workDir = (r && r.path) || '/';
+		folderName = handle ? handle.name : '';
+		curSession = '';
+		return r;
+	}
+
+	/* Permission may already be granted; otherwise it needs a click, so hold the
+	   handle and let the picker ask. */
+	let pendingFolder = null;
+	async function restoreFolder() {
+		if (!window.showDirectoryPicker) return;
+		const h = await recallFolder();
+		if (!h) return;
+		try {
+			if (await h.queryPermission({ mode: 'readwrite' }) === 'granted') {
+				await mountFolder(h);
+				await refreshState();
+			} else {
+				pendingFolder = h;
+			}
+		} catch (e) { /* handle no longer valid: the picker will ask again */ }
+	}
+
+	window.hakoPendingFolder = () => (pendingFolder ? pendingFolder.name : '');
+	window.hakoReconnectFolder = async () => {
+		if (!pendingFolder) return false;
+		try {
+			if (await pendingFolder.requestPermission({ mode: 'readwrite' }) !== 'granted') return false;
+		} catch (e) { return false; }
+		const h = pendingFolder;
+		pendingFolder = null;
+		return !!(await mountFolder(h)).path;
+	};
+	let pendingKey = null;          /* provider awaiting a pasted key */
+	let pendingCode = null;         /* provider awaiting a pasted OAuth code */
+	let askAfterTurn = null;        /* a prompt to raise once the turn is finished */
+	let pendingPrompt = null;       /* what the user asked before we interrupted */
+
+	worker.onmessage = (ev) => {
+		const m = ev.data || {};
+		if (m.type === 'ready') {
+			booted = true;
+			if (m.dir) workDir = m.dir;
+			worker.postMessage({ type: 'state' });
+			restoreFolder();
+			return;
+		}
+		if (m.type === 'open' && m.path) workDir = m.path;
+		if (m.type === 'config') { config = m.config; configReady(); return; }
+		if (m.type === 'session') { curSession = m.id; return; }
+		if (m.type === 'version') { agentVersion = m.version; return; }
+		if (m.type === 'live') {
+			const changed = m.provider !== config.provider || m.model !== config.model;
+			if (m.provider) config.provider = m.provider;
+			if (m.model) config.model = m.model;
+			/* The header was already drawn from whatever state said at boot. */
+			if (changed && typeof handshake === 'function') handshake();
+			return;
+		}
+		if (m.id !== undefined && asking.has(m.id)) {
+			asking.get(m.id)(m);
+			asking.delete(m.id);
+			return;
+		}
+		if (m.type === 'out') {
+			let obj;
+			try { obj = JSON.parse(m.line); } catch (e) { return; }
+			if (collecting) {
+				if (obj.type === 'message' && obj.role === 'system') { collecting.lines.push(obj.text || ''); return; }
+				if (obj.type === 'done') { collecting.finish(); return; }
+				return;                       /* a collected command speaks to us, not the transcript */
+			}
+			emit(obj);
+			if (obj.type === 'done' && askAfterTurn) {
+				const q = askAfterTurn;
+				askAfterTurn = null;
+				emit({ type: 'input_request', prompt: q.prompt, hidden: q.hidden });
+			}
+			return;
+		}
+		if (m.type === 'log') console.debug('[hako]', m.line);
+		if (m.type === 'error') emit({ type: 'error', text: m.error });
+	};
+	worker.postMessage({ type: 'boot', wasmUrl: 'hako.wasm' });
+
+	const run = (lines) => worker.postMessage({ type: 'run', lines });
+
+	/* Some routes need data only the agent has (its provider table, its model
+	   catalog). Rather than copy that into JS — where it would drift the moment
+	   hako.c changed — run the command and collect what it prints. */
+	/* Request/response over postMessage: routes that read stored state ask the
+	   worker and await the matching reply. */
+	let askSeq = 0;
+	const asking = new Map();
+	const ask = (type, extra) => new Promise((resolve) => {
+		const id = ++askSeq;
+		asking.set(id, resolve);
+		worker.postMessage({ type, id, ...extra });
+		setTimeout(() => { if (asking.has(id)) { asking.delete(id); resolve(null); } }, 4000);
+	});
+
+	/* The agent announces its provider and model in every init event, and only a
+	   turn produces one. Run a silent command at boot so the header is right
+	   before the user touches anything. */
+	whenConfig.then(() => runCollect(':session'));
+
+	let collecting = null;
+	const runCollect = (cmd) => new Promise((resolve) => {
+		const lines = [];
+		collecting = { lines, resolve };
+		const done = () => { collecting = null; resolve(lines); };
+		const timer = setTimeout(done, 5000);
+		collecting.finish = () => { clearTimeout(timer); done(); };
+		run([JSON.stringify({ type: 'slash', cmd })]);
+	});
+
+	/* The UI's HTTP calls, answered in-page. Same routes, same shapes. */
+	const routes = {
+		'/api/state': async () => (await whenConfig, {
+			awaiting_code: pendingCode ? 1 : 0,
+			version: (agentVersion || '') + ' wasm' + (buildId ? ' b' + buildId.slice(-5) : ''),
+			dir: workDir, home: folderName ? workDir : WORKSPACE,
+			root: folderName ? '' : WORKSPACE, places: [],
+			folder: folderName,
+			provider: config.provider, model: config.model, session: curSession, turns: 0,
+			busy: 0, yolo: 0,
+			awaiting_input: (pendingKey || pendingCode) ? 1 : 0,
+			input_hidden: pendingKey ? 1 : 0,
+			input_prompt: pendingKey ? ('paste your ' + pendingKey + ' API key')
+			            : pendingCode ? 'paste the code shown on that page' : '',
+			caps: ['prompt', 'slash', 'input', 'events', 'models', 'providers', 'sessions',
+			       'history', 'rename', 'delete', 'dirs', 'files', 'open', 'mkdir',
+			       'upload', 'save', 'wasm']
+			      .concat(window.showDirectoryPicker ? ['pickfolder'] : []),
+		}),
+		'/api/sessions': async () => {
+			const r = await ask('sessions');
+			return { dir: workDir, current: curSession,
+			         sessions: (r && r.sessions) || [] };
+		},
+		'/api/dirs': async (query) => {
+			const r = await ask('dirs', { path: query.get('path') || workDir });
+			return r || { path: workDir, dirs: [], files: [] };
+		},
+		'/api/models': async () => {
+			const lines = await runCollect(':models list');
+			const catalog = lines
+				.map((l) => l.trim().replace(/^[◎●*>]\s*/, ''))
+				.filter((l) => l && !/\s/.test(l));
+			return { installed: [], found: [], known: [], catalog, provider: config.provider, model: config.model };
+		},
+		'/api/providers': async () => {
+			const lines = await runCollect(':providers list');
+			const providers = [];
+			for (const l of lines) {
+				const m = l.match(/^\s*([◎*\s]*)\s*([a-z][a-z0-9-]+)\s{2,}(.+)$/);
+				if (m) providers.push({
+					name: m[2], desc: m[3].trim(), kind: 'key',
+					saved: m[1].includes('*'), active: m[1].includes('◎'),
+				});
+			}
+			return { active: config.provider, providers };
+		},
+	};
+
+	const origFetch = window.fetch.bind(window);
+	window.fetch = async (input, init) => {
+		const url = typeof input === 'string' ? input : input.url;
+		if (!url.startsWith('/api/')) return origFetch(input, init);
+		const path = url.split('?')[0];
+		const query = new URLSearchParams(url.split('?')[1] || '');
+		const body = init && init.body ? String(init.body) : '';
+
+		if (path === '/api/prompt') {
+			emit({ type: 'message', role: 'user', text: body });   /* the agent never replays it */
+			if (!config.has_key) { pendingPrompt = body; needKey(config.provider || 'gemini'); return json({ ok: true }); }
+			run([JSON.stringify({ type: 'prompt', text: body })]);
+			return json({ ok: true });
+		}
+		if (path === '/api/slash') {
+			/* `:login` opens an OAuth loopback the browser cannot host, so in this
+			   build it becomes what it can be: paste a key. The key is written to
+			   the agent's own ~/.hakorc in OPFS and never touches this page again. */
+			/* Switching sessions is navigation, not conversation. */
+			if (!/^[:/](resume|session)\b/.test(body)) emit({ type: 'message', role: 'user', text: body });
+			const m = body.match(/^[:/]login\s+(\S+)(?:\s+(.*))?$/);
+			if (m) {
+				const p = m[1], rest = (m[2] || '').trim();
+
+				/* OAuth cannot complete from a web page for any provider here: the
+				   token endpoints refuse cross-origin requests. Anthropic's allows
+				   only console.anthropic.com; GitHub's device endpoint sends no CORS
+				   headers at all. The key-paste variants have no such problem. */
+				const OAUTH_BLOCKED = {
+					anthropic: 'anthropic-api',
+					openrouter: 'openrouter-api',
+					copilot: null,
+					'github-models': null,
+				};
+				if (p in OAUTH_BLOCKED) {
+					const alt = OAUTH_BLOCKED[p];
+					emit({ type: 'message', role: 'system',
+					       text: p + ' signs in with OAuth, and its token endpoint refuses requests from a '
+					           + 'web page. Run `hako --serve` on a machine to use it there.'
+					           + (alt ? ' Here, `:login ' + alt + '` takes an API key.' : '') });
+					endTurn();
+					return json({ ok: true });
+				}
+				needKey(p);
+				return json({ ok: true });
+			}
+			const res = body.match(/^[:/]resume\s+(\S+)/);
+			if (res) { await ask('session-use', { session: res[1] }); curSession = res[1]; endTurn(); return json({ ok: true }); }
+			if (/^[:/]session\s+new\b/.test(body)) {
+				await ask('session-use', { session: null });
+				curSession = '';
+				emit({ type: 'message', role: 'system', text: 'new session' });
+				endTurn();
+				return json({ ok: true });
+			}
+			run([JSON.stringify({ type: 'slash', cmd: body })]);
+			return json({ ok: true });
+		}
+		if (path === '/api/input') {
+			if (pendingCode) {
+				const provider = pendingCode;
+				pendingCode = null;
+				if (body) run([JSON.stringify({ type: 'slash', cmd: ':login ' + provider + ' ' + body })]);
+				else { emit({ type: 'message', role: 'system', text: '(no code entered)' }); endTurn(); }
+				return json({ ok: true });
+			}
+			if (pendingKey) {
+				const provider = pendingKey;
+				pendingKey = null;
+				if (body) {
+					/* Config first, then the provider switch, then whatever the user
+					   was originally trying to do — in one run, so the key is in
+					   place before the turn that needs it. */
+					worker.postMessage({ type: 'config', patch: { ai_provider: provider, ai_api_key: body } });
+					emit({ type: 'message', role: 'system', text: 'key saved for ' + provider + ' — stored on this device only' });
+					const lines = [JSON.stringify({ type: 'slash', cmd: ':provider ' + provider })];
+					if (pendingPrompt) { lines.push(JSON.stringify({ type: 'prompt', text: pendingPrompt })); pendingPrompt = null; }
+					run(lines);
+				} else {
+					pendingPrompt = null;
+					emit({ type: 'message', role: 'system', text: '(no key entered)' });
+					endTurn();
+				}
+			}
+			return json({ ok: true });
+		}
+		if (path === '/api/events') return sse();
+		if (path === '/api/session/delete') {
+			await ask('session-delete', { session: body });
+			if (curSession === body) curSession = '';
+			return json({ ok: true });
+		}
+		if (path === '/api/session/rename') {
+			const nl = body.indexOf('\n');
+			await ask('session-rename', { session: body.slice(0, nl), title: body.slice(nl + 1) });
+			return json({ ok: true });
+		}
+		if (path === '/api/upload') {
+			/* Text only: the store holds strings. */
+			const name = (query.get('name') || 'file').split('/').pop();
+			const into = query.get('dir') || workDir;
+			const buf = new Uint8Array(await init.body.arrayBuffer());
+			if (buf.includes(0)) {
+				emit({ type: 'message', role: 'system',
+				       text: name + ' looks binary — the browser build stores text files only' });
+				return json({ ok: false });
+			}
+			const text = new TextDecoder().decode(buf);
+			const r = await ask('file-write', { path: into.replace(/\/$/, '') + '/' + name, text });
+			if (r && r.ok) emit({ type: 'message', role: 'system',
+			                      text: 'added ' + name + ' (' + buf.length + ' bytes) to ' + into });
+			return json({ ok: !!(r && r.ok) });
+		}
+		if (path === '/api/find') return json({ candidates: [] });
+		if (path === '/api/file/delete') {
+			const r = await ask('file-delete', { path: body });
+			return json({ ok: !!(r && r.ok) });
+		}
+		if (path === '/api/file') {
+			const r = await ask('file-read', { path: query.get('path') || '' });
+			if (!r || r.text === null || r.text === undefined) return new Response('', { status: 404 });
+			return new Response(r.text, { headers: { 'Content-Type': 'text/plain' } });
+		}
+		if (path === '/api/mkdir') {
+			await ask('mkdir', { path: body });
+			return json({ ok: true });
+		}
+		if (path === '/api/open') {
+			const target = body || '/work';
+			const r = await ask('open', { path: target });
+			workDir = (r && r.path) || target;
+			/* Re-announce, so the header and sessions reflect the new folder. */
+			run([JSON.stringify({ type: 'slash', cmd: ':sessions' })]);
+			return json({ ok: true });
+		}
+		if (path.startsWith('/api/history')) {
+			const id = query.get('id') || '';
+			const r = await ask('history', { session: id });
+			return json({ messages: (r && r.messages) || [] });
+		}
+		const fn = routes[path];
+		return json(fn ? await fn(query) : { ok: true });
+	};
+
+	/* No HTTP body can carry a directory handle, so this is not a route. */
+	window.hakoMountFolder = async (handle) => {
+		const r = await mountFolder(handle);
+		if (handle) await rememberFolder(handle); else await forgetFolder();
+		return !!(r && r.path);
+	};
+
+	const json = (o) => new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } });
+
+	/* Ask for a key using the same box the native build uses for OAuth codes. */
+	/* Where each provider hands out a key. The native build opens this in a
+	   browser; here the page is the browser, so it goes in the message. */
+	const KEY_URL = {
+		gemini: 'https://aistudio.google.com/apikey',
+		openai: 'https://platform.openai.com/api-keys',
+		'anthropic-api': 'https://console.anthropic.com/settings/keys',
+		anthropic: 'https://console.anthropic.com/settings/keys',
+		groq: 'https://console.groq.com/keys',
+		deepseek: 'https://platform.deepseek.com/api_keys',
+		mistral: 'https://console.mistral.ai/api-keys',
+		cerebras: 'https://cloud.cerebras.ai',
+		openrouter: 'https://openrouter.ai/keys',
+		xai: 'https://console.x.ai',
+		together: 'https://api.together.ai/settings/api-keys',
+		fireworks: 'https://fireworks.ai/api-keys',
+	};
+
+	/* Anything that answers without running the agent must still end the turn:
+	   the UI's spinner stops on `done`, and without one it spins forever. */
+	const endTurn = () => emit({ type: 'done', turn: 0, in: 0, out: 0, session: '' });
+
+	const needKey = (provider) => {
+		pendingKey = provider;
+		const url = KEY_URL[provider];
+		emit({ type: 'message', role: 'system',
+		       text: 'This runs entirely in your browser, so it needs your own API key. '
+		           + 'It is stored on this device and sent only to ' + provider + '.' });
+		if (url) emit({ type: 'message', role: 'system', text: 'Get one here: ' + url });
+		emit({ type: 'input_request', prompt: 'paste your ' + provider + ' API key', hidden: 1 });
+		endTurn();
+	};
+
+	/* EventSource wants a stream; give it one fed by the worker. */
+	const sse = () => new Response(new ReadableStream({
+		start(controller) {
+			const enc = new TextEncoder();
+			const push = (o) => controller.enqueue(enc.encode('data: ' + JSON.stringify(o) + '\n\n'));
+			ring.forEach(push);
+			listeners.push(push);
+		},
+	}), { headers: { 'Content-Type': 'text/event-stream' } });
+
+	/* EventSource itself cannot be intercepted by patching fetch, so give the UI
+	   one that reads from the same in-page stream. */
+	window.EventSource = class {
+		constructor() {
+			this.onopen = null; this.onmessage = null; this.onerror = null;
+			setTimeout(() => {
+				if (this.onopen) this.onopen();
+				ring.forEach((o) => this.onmessage && this.onmessage({ data: JSON.stringify(o) }));
+				listeners.push((o) => this.onmessage && this.onmessage({ data: JSON.stringify(o) }));
+			}, 0);
+		}
+		close() {}
+	};
+}
+</script>
+<script>
 const $ = (id) => document.getElementById(id);
 const log = $('log'), meta = $('meta'), dot = $('dot'), form = $('form');
 const input = $('input'), send = $('send'), sessionsEl = $('sessions'), dirEl = $('dir');
+const filesEl = $('files');
+const tray = $('tray');
 
 /* ---------- settings: on this device only, never sent anywhere ---------- */
 const SETTINGS_KEY = 'hako.studio.settings';
@@ -247,8 +776,40 @@ applyTheme(settings.theme);
 
 /* ---------- state ---------- */
 let busy = false;
-let state = { provider: '', model: '', turns: 0, session: '', dir: '' };
+let state = { provider: '', model: '', turns: 0, session: '', dir: '', version: '',
+              home: '', places: [], folder: '', root: '' };
 const askBoxes = new Map();
+
+/* ---------- capability handshake ----------
+   This UI updates over the air; the core it is talking to does not necessarily
+   move with it (an app's native code ships at release cadence, and a browser tab
+   can outrun the binary serving it). So ask what this core supports and degrade,
+   never assume a version. */
+let caps = new Set();
+const isWasm = !!document.querySelector('meta[name="hako-mode"][content="wasm"]');
+/* Shown in the header so "is this the new build?" has an answer. */
+const buildId = (document.querySelector('meta[name="hako-build"]') || {}).content || '';
+async function handshake() {
+	try {
+		const j = await (await fetch('/api/state')).json();
+		caps = new Set(j.caps || []);
+		state.provider = j.provider || ''; state.model = j.model || '';
+		state.turns = j.turns || 0; state.dir = j.dir || ''; state.version = j.version || '';
+		state.home = j.home || '';
+		state.places = j.places || [];
+		state.folder = j.folder || '';
+		state.root = j.root || '';
+		renderMeta();
+		/* A reload mid-prompt: the core still wants an answer, so ask again. */
+		if (j.awaiting_input) askInput({ prompt: j.input_prompt, hidden: j.input_hidden });
+		else { pendingInput = null; renderPending(); }
+	} catch (e) { caps = new Set(); }
+}
+async function refreshState() {
+	await handshake();
+	await loadSessions();
+}
+const closeNav = () => document.body.classList.remove('nav');
 
 function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); }
 function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
@@ -260,7 +821,17 @@ function add(cls, who, text) {
 		const w = document.createElement('span');
 		w.className = 'who'; w.textContent = who; el.appendChild(w);
 	}
-	el.appendChild(document.createTextNode(text));
+	/* A bare URL in the transcript is useless on a phone — the login flow hands
+	   one over and expects you to open it. Only http(s), only as text nodes. */
+	const parts = String(text).split(/(https?:\/\/[^\s]+)/g);
+	parts.forEach((part, i) => {
+		if (i % 2 === 1) {
+			const a = document.createElement('a');
+			a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer';
+			a.textContent = part;
+			el.appendChild(a);
+		} else if (part) el.appendChild(document.createTextNode(part));
+	});
 	if (spinEl) log.insertBefore(el, spinEl);   /* keep the spinner last */
 	else log.appendChild(el);
 	if (stick) log.scrollTop = log.scrollHeight;
@@ -321,8 +892,10 @@ function stopThinking() {
 }
 function setBusy(v) {
 	busy = v;
-	send.disabled = v;
-	send.textContent = v ? '…' : 'send';
+	/* A core that can be interrupted turns the send button into a stop button —
+	   on a phone there is no Ctrl-C to fall back on. Older cores just grey out. */
+	send.disabled = v && !caps.has('stop');
+	send.textContent = v ? (caps.has('stop') ? 'stop' : '…') : 'send';
 	if (v) startThinking(); else stopThinking();
 }
 
@@ -414,10 +987,71 @@ function askApproval(m) {
 	mk('', 'deny', 'n');
 	mk('', ALWAYS_LABEL[m.kind] || 'always allow', 'a');
 	box.append(head, subj, row);
-	log.appendChild(box);
+	if (spinEl) log.insertBefore(box, spinEl);   /* in order, above the spinner */
+	else log.appendChild(box);
 	if (m.id) askBoxes.set(String(m.id), box);
 	if (stick) log.scrollTop = log.scrollHeight;
 }
+/* The core asks for a line of text — an OAuth code, a yes/no. Without this the
+   agent would be waiting on a terminal the browser does not have. */
+let pendingInput = null;
+
+/* Dismissing the box must not strand the turn: the request stays pending and a
+   banner offers it back. Only an explicit cancel answers (empty), which is what
+   actually unparks the agent. */
+function renderPending() {
+	let bar = document.getElementById('pending');
+	if (!pendingInput) { if (bar) bar.remove(); return; }
+	if (!bar) {
+		bar = document.createElement('button');
+		bar.id = 'pending';
+		bar.type = 'button';
+		bar.className = 'pending';
+		bar.addEventListener('click', () => askInput(pendingInput));
+		form.parentNode.insertBefore(bar, form);
+	}
+	bar.textContent = '● the agent is waiting: ' + (pendingInput.prompt || 'input needed') + ' — tap to answer';
+}
+
+function askInput(m) {
+	pendingInput = m;
+	renderPending();
+	const box = modal(m.prompt || 'input needed');
+	const n = document.createElement('div');
+	n.className = 'note';
+	n.textContent = m.hidden
+		? 'Open the link above, sign in, then paste what it gives you. It is sent straight to the agent on this machine and stored by hako, not by this page.'
+		: 'The agent is waiting on this.';
+	box.body.appendChild(n);
+
+	const wrap = document.createElement('div');
+	wrap.style.padding = '.35rem .55rem';
+	const inp = document.createElement('input');
+	inp.type = m.hidden ? 'password' : 'text';
+	inp.autocapitalize = 'off'; inp.autocomplete = 'off'; inp.spellcheck = false;
+	inp.placeholder = m.hidden ? 'paste here' : '';
+	wrap.appendChild(inp);
+	box.body.appendChild(wrap);
+
+	const send_ = () => {
+		pendingInput = null; renderPending();
+		box.close();
+		post('/api/input', inp.value);
+	};
+	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value) send_(); });
+	const g = document.createElement('div'); g.className = 'grow';
+	/* Closing without answering would leave the turn parked, so cancel answers. */
+	box.foot.append(g, mb('cancel', '', () => {
+		pendingInput = null; renderPending();
+		box.close();
+		post('/api/input', '');       /* an unanswered prompt would park the turn forever */
+	}), mb('send', 'primary', send_));
+	setTimeout(() => inp.focus(), 50);
+}
+
+/* The core's display string sometimes already carries its own arrow. */
+const arrowed = (mark, text) => /^\s*[→←]/.test(text) ? text.trim() : mark + ' ' + text;
+
 function settle(box, ans) {
 	box.classList.add('settled');
 	const v = document.createElement('span');
@@ -457,6 +1091,67 @@ function captureLine(text) {
 	return true;
 }
 
+/* ---------- provider picker ----------
+   Reads /api/providers. The old version scraped the printed `:providers` table,
+   whose rows are columns of prose — the scrape matched nothing, so the picker
+   always came up empty while typing a name by hand worked fine. */
+async function openProviderPicker(onPicked) {
+	const m = modal('provider');
+	m.body.appendChild(Object.assign(document.createElement('div'),
+		{ className: 'note', textContent: 'loading…' }));
+	let j = { providers: [] };
+	try { j = await (await fetch('/api/providers')).json(); } catch (e) {}
+	m.body.textContent = '';
+
+	const groups = [['signed in', (p) => p.saved],
+	                ['local — no account', (p) => !p.saved && p.kind === 'local'],
+	                ['sign in', (p) => !p.saved && p.kind === 'oauth'],
+	                ['api key', (p) => !p.saved && p.kind === 'key']];
+
+	groups.forEach(([label, filter]) => {
+		const rows = (j.providers || []).filter(filter);
+		if (!rows.length) return;
+		m.body.appendChild(groupLabel(label));
+		rows.forEach((p) => m.body.appendChild(optionRow(
+			p.name, p.desc, p.saved ? 'ready' : (p.kind === 'oauth' ? 'login' : ''),
+			async () => {
+				m.close();
+				state.provider = p.name; state.model = ''; renderMeta();
+				await post('/api/slash', ':provider ' + p.name);
+				/* Not signed in yet? The next thing you need is the login, so run it. */
+				if (!p.saved && p.kind !== 'local') await post('/api/slash', ':login ' + p.name);
+				/* Switching fetches the provider's catalog, which takes seconds. A
+				   fixed delay raced it and the model list arrived for the provider
+				   we just left. Wait for the agent to say it has moved. */
+				await settledOnProvider(p.name);
+				if (onPicked) onPicked();
+			}, p.active)));
+	});
+
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('cancel', '', m.close));
+}
+
+/* The agent is the authority on which provider is live; poll until it agrees,
+   or give up and let the caller show whatever is current. */
+async function settledOnProvider(name, ms = 12000) {
+	const want = String(name || '').replace(/-api$/, '');
+	const until = Date.now() + ms;
+	while (Date.now() < until) {
+		try {
+			const j = await (await fetch('/api/state')).json();
+			if (j.provider && (j.provider === want || j.provider === name)) {
+				state.provider = j.provider;
+				state.model = j.model || '';
+				renderMeta();
+				return true;
+			}
+		} catch (e) { /* keep waiting */ }
+		await new Promise((r) => setTimeout(r, 350));
+	}
+	return false;
+}
+
 /* ---------- model picker ---------- */
 function setModel(id, localModel) {
 	/* Provider first: switching providers resets the model in hako. */
@@ -469,57 +1164,187 @@ function setModel(id, localModel) {
 	renderMeta();
 }
 async function openModelPicker() {
-	const m = modal('model');
-	m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'loading…' }));
-	let j = { installed: [], found: [], known: [] };
+	/* No provider means the model list is meaningless — ask the question that
+	   actually needs answering first, then come back here. */
+	if (!state.provider || state.provider === 'none') {
+		openProviderPicker(() => openModelPicker());
+		return;
+	}
+
+	const m = modal('model · ' + state.provider);
+	m.body.appendChild(Object.assign(document.createElement('div'),
+		{ className: 'note', textContent: 'loading…' }));
+	let j = { installed: [], found: [], known: [], catalog: [] };
+	const q = '/api/models?search=' + encodeURIComponent(settings.modelPaths.join(','));
 	try {
-		const r = await fetch('/api/models?search=' + encodeURIComponent(settings.modelPaths.join(',')));
-		j = await r.json();
+		j = await (await fetch(q)).json();
+		/* The answer says which provider it is for. If that is not the one we are
+		   on, the switch was still in flight — ask again rather than list another
+		   provider's models under this provider's heading. */
+		if (j.provider && state.provider && j.provider !== state.provider) {
+			await settledOnProvider(state.provider, 8000);
+			j = await (await fetch(q)).json();
+		}
 	} catch (e) {}
 	m.body.textContent = '';
 
-	if (j.installed.length) {
-		m.body.appendChild(groupLabel('local — installed'));
-		j.installed.forEach((x) => m.body.appendChild(
-			optionRow(x.id, fmtGB(x.bytes), 'ready', () => { m.close(); setModel(x.id, true); }, x.id === state.model)));
+	const local = state.provider === 'mithraeum';
+
+	/* The provider you are on decides what is offered first. Everything else is
+	   noise you have to scroll past. */
+	if (!local && (j.catalog || []).length) {
+		m.body.appendChild(groupLabel(state.provider + ' models'));
+		j.catalog.forEach((id) => m.body.appendChild(
+			optionRow(id, '', '', () => { m.close(); setModel(id, false); }, id === state.model)));
 	}
-	const installedIds = new Set(j.installed.map((x) => x.id));
-	const found = (j.found || []).filter((x) => !installedIds.has(x.id));
-	if (found.length) {
-		m.body.appendChild(groupLabel('found on this device — link to use'));
-		found.forEach((x) => m.body.appendChild(
-			optionRow(x.id, x.path, 'link', async () => {
-				m.close();
-				add('turn system', '', 'linking ' + x.id + ' from ' + x.path);
-				const r = await post('/api/link', x.path);
-				if (r && r.ok) setModel(x.id, true);
-				else add('turn error', '', 'could not link ' + x.path);
-			})));
+
+	if (local || (j.installed || []).length) {
+		const installed = j.installed || [];
+		if (installed.length) {
+			m.body.appendChild(groupLabel(local ? 'installed' : 'on this machine — switches to mithraeum'));
+			installed.forEach((x) => m.body.appendChild(
+				optionRow(x.id, fmtGB(x.bytes), 'ready',
+					() => { m.close(); setModel(x.id, true); }, x.id === state.model)));
+		}
+
+		const installedIds = new Set(installed.map((x) => x.id));
+		const found = (j.found || []).filter((x) => !installedIds.has(x.id));
+		if (found.length) {
+			m.body.appendChild(groupLabel('found on this device — link to use'));
+			found.forEach((x) => m.body.appendChild(
+				optionRow(x.id, x.path, 'link', async () => {
+					m.close();
+					add('turn system', '', 'linking ' + x.id + ' from ' + x.path);
+					const r = await post('/api/link', x.path);
+					if (r && r.ok) setModel(x.id, true);
+					else add('turn error', '', 'could not link ' + x.path);
+				})));
+		}
+
+		const missing = (j.known || []).filter((id) => !installedIds.has(id) && !found.some((f) => f.id === id));
+		if (missing.length) {
+			m.body.appendChild(groupLabel('available to download'));
+			missing.forEach((id) => m.body.appendChild(
+				optionRow(id, 'from huggingface.co/mithraeum', 'pull', () => {
+					m.close();
+					add('turn system', '', 'downloading ' + id + ' — multi-GB, runs on the machine hosting hako.');
+					post('/api/slash', ':pull ' + id);
+				})));
+		}
 	}
-	const missing = (j.known || []).filter((id) => !installedIds.has(id) && !found.some((f) => f.id === id));
-	if (missing.length) {
-		m.body.appendChild(groupLabel('available to download'));
-		missing.forEach((id) => m.body.appendChild(
-			optionRow(id, 'from huggingface.co/mithraeum', 'pull', () => {
-				m.close();
-				add('turn system', '', 'downloading ' + id + ' — this is a multi-GB transfer and runs on this machine.');
-				post('/api/slash', ':pull ' + id);
-			})));
-	}
-	m.body.appendChild(groupLabel('cloud'));
-	m.body.appendChild(optionRow('browse this provider’s catalog…', '', '', () => {
-		m.close();
-		listThenPick(':models list', 'model', 'model', (v) => { post('/api/slash', ':model ' + v); state.model = v; renderMeta(); });
-	}));
+
+	if (!m.body.children.length)
+		m.body.appendChild(Object.assign(document.createElement('div'),
+			{ className: 'note', textContent: 'no models listed for ' + state.provider + ' — type one below' }));
 
 	const inp = document.createElement('input');
 	inp.placeholder = 'or type a model id';
-	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) { m.close(); setModel(inp.value.trim(), false); } });
+	inp.autocapitalize = 'off'; inp.autocomplete = 'off'; inp.spellcheck = false;
+	inp.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' && inp.value.trim()) { m.close(); setModel(inp.value.trim(), local); }
+	});
 	const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
-	m.foot.append(g, mb('cancel', '', m.close));
+	m.foot.append(g, mb('provider', '', () => { m.close(); openProviderPicker(() => openModelPicker()); }),
+	              mb('close', '', m.close));
+}
+
+/* ---------- attachments ----------
+   Chips carry PATHS, not bytes: the agent already has the filesystem, so it only
+   needs to be told where to look. Sent as a trailing line, which reads naturally
+   in the transcript and gives the model something it can act on. */
+const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+                     : n >= 1024    ? Math.round(n / 1024) + ' KB' : n + ' B';
+
+/* Two kinds of attachment: a PATH already on the machine (nothing to transfer),
+   and a FILE picked off this device, which is held here and only uploaded when
+   you actually send. Removing a chip therefore leaves nothing behind — uploading
+   on pick meant a file you changed your mind about was already in the project. */
+const attached = [];
+function renderTray() {
+	tray.textContent = '';
+	tray.hidden = !attached.length;
+	attached.forEach((a, i) => {
+		const chip = document.createElement('span');
+		chip.className = 'chip';
+		const nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = (a.file ? '↑ ' : '') + a.name.split('/').pop();
+		nm.title = a.file ? a.name + ' — uploads when you send' : a.name;
+		const rm = document.createElement('button');
+		rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×';
+		rm.title = 'remove';
+		rm.addEventListener('click', () => { attached.splice(i, 1); renderTray(); });
+		chip.append(nm, rm);
+		tray.appendChild(chip);
+	});
+}
+function attach(name, file) {
+	if (!attached.some((a) => a.name === name && !!a.file === !!file)) attached.push({ name, file });
+	renderTray();
+	input.focus();
+}
+
+/* Upload anything picked off the device, then hand back every path to mention. */
+async function flushAttachments() {
+	const paths = [];
+	for (const a of attached) {
+		if (!a.file) { paths.push(a.name); continue; }
+		if (!caps.has('upload')) { add('turn error', '', 'this agent cannot accept uploads'); continue; }
+		add('turn system', '', 'sending ' + a.name + ' (' + fmtSize(a.file.size) + ') …');
+		try {
+			const r = await fetch('/api/upload?name=' + encodeURIComponent(a.name), { method: 'POST', body: a.file });
+			const j = await r.json();
+			if (j.ok) paths.push(a.name);
+			else add('turn error', '', 'could not send ' + a.name);
+		} catch (e) { add('turn error', '', 'could not send ' + a.name + ': ' + e.message); }
+	}
+	attached.length = 0;
+	renderTray();
+	return paths;
+}
+
+/* A file the agent wrote is only useful if it can leave. The browser's download
+   is the one exit every platform has, including iOS, where it lands in Files. */
+async function saveOut(path, name) {
+	const r = await fetch('/api/file?path=' + encodeURIComponent(path));
+	if (!r.ok) return;
+	const blob = new Blob([await r.text()], { type: 'application/octet-stream' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = name;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 /* ---------- folder picker ---------- */
+/* Said once, before anything is typed. Where the work lives is the first thing
+   a person needs to know about this build, not something to discover when it
+   disappears. */
+function browserNotice() {
+	if (!isWasm || settings.browser_notice) return;
+	const m = modal('this runs in your browser');
+	const n = document.createElement('div');
+	n.className = 'note';
+	n.innerHTML =
+		'The agent runs on <b>this device</b>. Nothing is sent to a server of ours — '
+		+ 'your key goes straight to the model provider, and your files never leave here.'
+		+ '<br><br>'
+		+ '<b>Work is kept in this browser\u2019s storage.</b> Clearing site data, or '
+		+ '\u201cclear history\u201d in some browsers, <b>erases your sessions and files</b>. '
+		+ 'Anything you want to keep, save out from the files list.'
+		+ '<br><br>'
+		+ 'For real folders on a disk, a shell, and local hako models, run '
+		+ '<code>hako --serve</code> or the desktop app.';
+	m.body.appendChild(n);
+	const ok = document.createElement('button');
+	ok.textContent = 'understood';
+	ok.addEventListener('click', () => { settings.browser_notice = true; saveSettings(); m.close(); });
+	m.foot.appendChild(ok);
+}
+
 function consentNotice(onOk) {
 	if (settings.consented) return onOk();
 	const m = modal('before you open a folder');
@@ -541,48 +1366,300 @@ function consentNotice(onOk) {
 	m.foot.firstChild.className = 'grow';
 }
 
-function openFolderPicker() {
-	consentNotice(async () => {
-		const m = modal('open folder');
-		let path = state.dir || '.';
+/* One browser for both jobs. Two modals listing the same directory — one showing
+   folders, one showing files, different buttons — was the jankiest thing here.
+   Now: walk anywhere, tap a file to attach it, open the folder as the project,
+   or pull a file off the device you are holding. */
+async function openBrowser() {
+	const m = modal('choose a working folder');
+	/* A directory picker is a navigation surface, not a menu — give it the whole
+	   screen so a deep path is browsable with a thumb. */
+	m.box.classList.add('sheet');
+	let path = state.dir || '.';
 
-		const draw = async (p) => {
+	const openBtn = mb('open this folder', 'primary', () => consentNotice(async () => {
+		m.close();
+		clearLog();
+		add('turn system', '', 'opening ' + path + ' …');
+		await post('/api/open', path);
+		state.session = '';
+		await loadSessions();
+	}));
+
+	/* Tapping "../" repeatedly to climb four levels is the worst part of a picker
+	   on a phone. Crumbs make every ancestor one tap away. */
+	const crumbs = document.createElement('div');
+	crumbs.className = 'crumbs';
+
+	const drawCrumbs = () => {
+		crumbs.textContent = '';
+		const seg = path.split('/').filter(Boolean);
+		const mk = (label, target) => {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'crumb';
+			b.textContent = label;
+			b.addEventListener('click', () => draw(target));
+			return b;
+		};
+		crumbs.appendChild(mk('/', '/'));
+		let acc = '';
+		seg.forEach((sgm) => {
+			acc += '/' + sgm;
+			crumbs.appendChild(mk(sgm, acc));
+		});
+	};
+
+	const draw = async (p) => {
+		if (isWasm && !state.folder && !state.dir) {
 			m.body.textContent = '';
-			let j;
-			try {
-				const r = await fetch('/api/dirs?path=' + encodeURIComponent(p));
-				j = await r.json();
-			} catch (e) {
-				m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'cannot read ' + p }));
-				return;
+			m.title.textContent = 'no folder open';
+			const remembered = window.hakoPendingFolder && window.hakoPendingFolder();
+			if (remembered) {
+				m.body.appendChild(optionRow(remembered, 'reconnect', '', async () => {
+					if (await window.hakoReconnectFolder()) { m.close(); await refreshState(); }
+					else draw(p);
+				}));
 			}
-			path = j.path;
-			m.title.textContent = path;
-			if (path !== '/') m.body.appendChild(optionRow('../', '', '', () => draw(path.replace(/\/[^/]+$/, '') || '/')));
-			(j.dirs || []).sort().forEach((d) =>
-				m.body.appendChild(optionRow(d + '/', '', '', () => draw(path === '/' ? '/' + d : path + '/' + d))));
-			if (!(j.dirs || []).length) m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: '(no subfolders)' }));
+			const n = document.createElement('div');
+			n.className = 'note';
+			n.innerHTML = caps.has('pickfolder')
+				? 'Choose any folder on this machine to work in — a repo, notes, a '
+				  + 'scratch directory, a synced folder. The agent reads and writes those '
+				  + 'files in place, and nothing is copied anywhere else.'
+				: 'This web instance of hako studio runs entirely in your browser, and '
+				  + 'uses your browser\u2019s storage to keep your settings, your sessions '
+				  + 'and the files the agent writes.<br><br>'
+				  + 'Its working directory is <code>' + (state.dir || '/workspace') + '</code> '
+				  + '\u2014 a folder inside that storage, not a folder on your device. It will '
+				  + 'not appear in Files, and clearing this site\u2019s data erases it. Save '
+				  + 'anything you want to keep from the files list.<br><br>'
+				  + 'Opening a real folder on your device needs an API your browser does not '
+				  + 'provide; Chromium-based browsers on desktop do. For real folders here, '
+				  + 'run <code>hako --serve</code> on a machine and open that address.';
+			m.body.appendChild(n);
+			m.foot.querySelectorAll('button').forEach((b) => {
+				if (!/choose folder|close/.test(b.textContent)) b.style.display = 'none';
+			});
+			return;
+		}
+		let j;
+		try {
+			const r = await fetch('/api/dirs?path=' + encodeURIComponent(p));
+			j = await r.json();
+		} catch (e) {
+			m.body.textContent = '';
+			m.body.appendChild(Object.assign(document.createElement('div'),
+				{ className: 'note', textContent: 'cannot read ' + p }));
+			return;
+		}
+		path = j.path || p;
+		m.title.textContent = path;
+		m.body.textContent = '';
+		drawCrumbs();
+		m.body.appendChild(crumbs);
+
+		/* One tap to the folders people actually use. iCloud Drive's real path is
+		   unmemorable, which made it the hardest folder on the machine to open. */
+		if ((state.places || []).length) {
+			const row = document.createElement('div');
+			row.className = 'crumbs places';
+			state.places.forEach((pl) => {
+				const b = document.createElement('button');
+				b.type = 'button';
+				b.className = 'crumb place';
+				b.textContent = pl.label;
+				b.addEventListener('click', () => draw(pl.path));
+				row.appendChild(b);
+			});
+			m.body.appendChild(row);
+		}
+
+		/* Quiet, but always there: people need to know where this lives, and the
+		   one-time notice at first run is long forgotten by now. */
+		if (isWasm && !state.folder) {
+			const w = document.createElement('div');
+			w.className = 'note';
+			w.style.opacity = '.72';
+			w.style.fontSize = '.78rem';
+			w.textContent = 'Stored in this browser on this device \u2014 not in Files, and not on any server. '
+			              + 'Clearing site data erases it. Save files out from the sidebar to keep them.';
+			m.body.appendChild(w);
+		}
+
+		openBtn.textContent = (path === state.dir) ? 'current project' : 'open this folder';
+		openBtn.disabled = (path === state.dir);
+
+		const dirs = (j.dirs || []).sort();
+		const files = (j.files || []).sort((a, b) => a.name.localeCompare(b.name));
+
+		const floor = state.root || '/';
+		if (path !== floor && path !== '/') m.body.appendChild(optionRow('../', '', '',
+			() => {
+				const up = path.replace(/\/[^/]+$/, '') || '/';
+				draw(up.startsWith(floor) ? up : floor);
+			}));
+
+		const removable = isWasm && !state.folder;
+		const withRemove = (row, full, label) => {
+			if (!removable) return row;
+			const wrap = document.createElement('div');
+			wrap.className = 'sessrow';
+			wrap.appendChild(row);
+			const x = document.createElement('button');
+			x.className = 'act del';
+			x.textContent = '×';
+			x.title = 'delete ' + label;
+			x.addEventListener('click', async (e) => {
+				e.stopPropagation();
+				if (!confirm('Delete ' + label + '? This cannot be undone.')) return;
+				await post('/api/file/delete', full);
+				draw(path);
+				loadFiles();
+			});
+			wrap.appendChild(x);
+			return wrap;
 		};
 
-		const inp = document.createElement('input');
-		inp.placeholder = 'or type an absolute path';
-		inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) draw(inp.value.trim()); });
-		const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
-		m.foot.append(g, mb('cancel', '', m.close), mb('open this folder', 'primary', async () => {
-			m.close();
-			clearLog();
-			add('turn system', '', 'opening ' + path + ' …');
-			await post('/api/open', path);
-			state.session = '';
-			await loadSessions();
-		}));
-		await draw(path);
+		dirs.forEach((d) => {
+			const full = (path === '/' ? '' : path) + '/' + d;
+			const row = optionRow(d + '/', '', '', () => draw(full));
+			m.body.appendChild(withRemove(row, full, d + '/'));
+		});
+
+		if (!dirs.length) m.body.appendChild(Object.assign(document.createElement('div'),
+			{ className: 'note', textContent: 'no subfolders here' }));
+
+		if (files.length) {
+			m.body.appendChild(groupLabel(files.length + ' file' + (files.length === 1 ? '' : 's') + ' here'));
+			const savable = isWasm && !state.folder && caps.has('save');
+			files.slice(0, 40).forEach((f) => {
+				const full = (path === '/' ? '' : path) + '/' + f.name;
+				const row = optionRow(f.name, fmtSize(f.bytes), savable ? 'save' : '',
+					savable ? () => saveOut(full, f.name) : () => {});
+				if (!savable) row.disabled = true;
+				m.body.appendChild(withRemove(row, full, f.name));
+			});
+			if (files.length > 40) m.body.appendChild(Object.assign(document.createElement('div'),
+				{ className: 'note', textContent: '… and ' + (files.length - 40) + ' more' }));
+		}
+	};
+
+	const inp = document.createElement('input');
+	inp.placeholder = caps.has('mkdir') ? 'a folder path, or a name to create' : 'or paste a folder path';
+	inp.autocapitalize = 'off'; inp.autocomplete = 'off'; inp.spellcheck = false;
+	inp.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' && inp.value.trim()) draw(inp.value.trim().replace(/^~/, state.home || '~'));
 	});
+	const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
+
+	/* Native folder dialogs, in order of what the browser actually allows:
+
+	   1. showDirectoryPicker() — Chromium desktop only. Returns a HANDLE: folder
+	      name and contents, never a path. Firefox refuses to ship it; Safari does
+	      not implement it on any platform.
+	   2. <input webkitdirectory> — desktop Safari and Firefox. Prompts with the
+	      real OS folder dialog, then hands over a flat list of the files inside.
+	      We ignore the files entirely and read webkitRelativePath for the folder
+	      name — the upload never happens.
+
+	   Either way the browser refuses to disclose a path, so the server resolves
+	   name + one child to a real directory. On phones neither exists and no
+	   button is shown. */
+	const resolveFolder = async (folderName, child) => {
+		m.body.textContent = '';
+		m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+			textContent: 'locating "' + folderName + '" on the machine running hako…' }));
+		let j = { candidates: [] };
+		try {
+			j = await (await fetch('/api/find?name=' + encodeURIComponent(folderName) +
+			                       '&child=' + encodeURIComponent(child || ''))).json();
+		} catch (e) {}
+		const hits = j.candidates || [];
+		if (hits.length === 1) { draw(hits[0]); return; }
+		m.body.textContent = '';
+		m.body.appendChild(crumbs);
+		if (!hits.length) {
+			m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+				textContent: '"' + folderName + '" was not found on the machine running hako. ' +
+				             'If the agent runs on another computer, browse to the folder there instead.' }));
+		} else {
+			m.body.appendChild(groupLabel('which "' + folderName + '"?'));
+			hits.forEach((h) => m.body.appendChild(optionRow(h, '', '', () => draw(h))));
+		}
+	};
+
+	let sysBtn = null;
+	if (isWasm) {
+		if (caps.has('pickfolder')) {
+			sysBtn = mb('choose folder…', '', async () => {
+				let handle;
+				try { handle = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+				catch (e) { return; }
+				m.body.textContent = '';
+				m.body.appendChild(Object.assign(document.createElement('div'),
+					{ className: 'note', textContent: 'reading ' + handle.name + '…' }));
+				const ok = await window.hakoMountFolder(handle);
+				if (ok) { m.close(); await refreshState(); }
+				else m.body.appendChild(Object.assign(document.createElement('div'),
+					{ className: 'note', textContent: 'could not open that folder' }));
+			});
+		}
+	} else if (window.showDirectoryPicker) {
+		sysBtn = mb('system picker…', '', async () => {
+			let handle;
+			try { handle = await window.showDirectoryPicker(); } catch (e) { return; }
+			let child = '';
+			try { for await (const [nm] of handle.entries()) { child = nm; break; } } catch (e) {}
+			resolveFolder(handle.name, child);
+		});
+	} else if ('webkitdirectory' in document.createElement('input')
+	           && window.matchMedia('(hover: hover)').matches) {
+		const dirInput = document.createElement('input');
+		dirInput.type = 'file';
+		dirInput.webkitdirectory = true;
+		dirInput.multiple = true;
+		dirInput.style.display = 'none';
+		dirInput.addEventListener('change', () => {
+			const f = (dirInput.files || [])[0];
+			dirInput.value = '';
+			if (!f) return;
+			const rel = (f.webkitRelativePath || '').split('/');
+			if (rel.length < 2) return;
+			resolveFolder(rel[0], rel[1]);      /* nothing is uploaded — names only */
+		});
+		m.body.appendChild(dirInput);
+		sysBtn = mb('system picker…', '', () => dirInput.click());
+	}
+
+	const mkdirBtn = caps.has('mkdir') ? mb('new folder', '', async () => {
+		const name = (inp.value || '').trim().replace(/^\/+|\/+$/g, '');
+		if (!name) { inp.placeholder = 'name the folder, then press new folder'; inp.focus(); return; }
+		const target = (path === '/' ? '' : path) + '/' + name;
+		const r = await post('/api/mkdir', target);
+		inp.value = '';
+		if (r && r.ok) draw(target); else inp.placeholder = 'could not create that folder';
+	}) : null;
+
+	const foot = [g];
+	if (sysBtn) foot.push(sysBtn);
+	if (mkdirBtn) foot.push(mkdirBtn);
+	foot.push(mb('home', '', () => draw(state.home || '~')), mb('close', '', m.close), openBtn);
+	m.foot.append(...foot);
+	await draw(path);
 }
 
 /* ---------- settings ---------- */
 function openSettings() {
 	const m = modal('settings');
+
+	m.body.appendChild(groupLabel('model'));
+	m.body.appendChild(optionRow(state.model || '(none)', 'change', '', () => {
+		m.close(); openModelPicker();
+	}));
+	m.body.appendChild(optionRow(state.provider || '(none)', 'provider', '', () => {
+		m.close(); openProviderPicker();
+	}));
 
 	m.body.appendChild(groupLabel('theme'));
 	Object.keys(THEMES).forEach((name) => {
@@ -655,16 +1732,85 @@ function openSettings() {
    `:resume` reloads the conversation into hako's context but replays nothing to
    the front end, so the pane would come back empty. Render the stored transcript
    ourselves — it's the same jsonl the CLI reads. */
+/* Stored transcripts predate the dialect repair (and always contain whatever the
+   model actually emitted), so clean them for display only — the file on disk is
+   never rewritten. */
+/* Turn a stored assistant message into the same shapes the live stream produces:
+   prose as prose, tool calls as chips. A transcript that shows raw XML while the
+   live view shows chips reads like two different apps. */
+function replayAssistant(raw) {
+	const text = String(raw || '');
+	const calls = [];
+	const subjectOf = (body) => {
+		const json = body.match(/"(?:path|file_path|command|script|dir|directory)"\s*:\s*"([^"]*)"/);
+		if (json) return json[1];
+		const param = body.match(/<parameter name="(?:path|dir|command)">([\s\S]*?)<\/parameter>/);
+		return param ? param[1].trim() : '';
+	};
+
+	/* Three dialects reach the transcript: the correct <tool name="x">, the
+	   near-miss <tool_name="x"> from before the normalizer, and Qwen's
+	   <tool_call>{"name":…,"arguments":…}</tool_call>. All render as one chip. */
+	const tagged = /<tool(?:_name="|\s+name=")([a-z_]+)"\s*>([\s\S]*?)<\/tool(?:_name)?>/gi;
+	let mm;
+	while ((mm = tagged.exec(text)) !== null)
+		calls.push({ name: mm[1], subject: subjectOf(mm[2]) });
+
+	const called = /<tool_call>([\s\S]*?)<\/tool_call>/gi;
+	while ((mm = called.exec(text)) !== null) {
+		const nm = mm[1].match(/"name"\s*:\s*"([^"]*)"/);
+		calls.push({ name: nm ? nm[1] : 'tool', subject: subjectOf(mm[1]) });
+	}
+
+	/* Claude's own XML: <function_calls><invoke name="x"><parameter …> */
+	const invoked = /<invoke name="([^"]+)">([\s\S]*?)<\/invoke>/gi;
+	while ((mm = invoked.exec(text)) !== null)
+		calls.push({ name: mm[1], subject: subjectOf(mm[2]) });
+	return { prose: stripTools(text), calls };
+}
+
+function stripTools(text) {
+	return String(text)
+		.replace(/<observation[^>]*>[\s\S]*?<\/observation>/g, '')
+		.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+		.replace(/<tool_name=[^>]*>[\s\S]*?<\/tool_name>/g, '')
+		.replace(/<tool\b[^>]*>[\s\S]*?<\/tool>/g, '')
+		.replace(/<write_file[^>]*>[\s\S]*?<\/write_file>/g, '')
+		.replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+		.replace(/<\/?(invoke|function_calls|tool_call|tool_name|tool)[^>]*>/g, '')
+		/* A response cut off mid-call leaves an unterminated block. Every rule
+		   above needs a closing tag, so without this the truncated tail — and
+		   everything after it — renders as raw markup. */
+		.replace(/<(?:function_calls|invoke|tool_call|tool_name|tool|parameter|observation|write_file)\b[\s\S]*$/, '')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+}
+
 async function renderHistory(id) {
 	try {
 		const r = await fetch('/api/history?id=' + encodeURIComponent(id));
 		const j = await r.json();
 		(j.messages || []).forEach((msg) => {
-			const text = msg.content || '';
-			if (!text) return;
-			if (msg.role === 'user') add('turn user', 'you', text);
-			else if (msg.role === 'assistant') add('turn model', 'hako', text);
-			else add('turn system', '', text);
+			if (msg.role === 'user') {
+				if (msg.content) add('turn user', 'you', msg.content);
+				return;
+			}
+			if (msg.role === 'assistant') {
+				/* Same shapes the live stream produces: chips for calls, prose for
+				   prose. A transcript that shows raw XML while the live view shows
+				   chips reads like two different applications. */
+				const { prose, calls } = replayAssistant(msg.content);
+				calls.forEach((c) => add('tool', '', '→ ' + c.name + '(' + (c.subject || '') + ')'));
+				if (prose) add('turn model', 'hako', prose);
+				return;
+			}
+			if (msg.role === 'tool') {
+				/* Same chip the live stream draws, so a reloaded transcript shows
+				   the work and not just the conclusion. */
+				if (msg.content) add('tool', '', '→ ' + msg.content);
+				return;
+			}
+			if (msg.content) add('turn system', '', msg.content);
 		});
 		if ((j.messages || []).length) {
 			const sep = add('turn system', '', '── end of saved history ──');
@@ -759,7 +1905,7 @@ async function loadSessions() {
 			w.className = 'when';
 			w.textContent = s.id.slice(0, 8) + ' · ' + when(s.mtime);
 			b.appendChild(w);
-			b.addEventListener('click', () => resumeSession(s.id));
+			b.addEventListener('click', () => { closeNav(); resumeSession(s.id); });
 
 			const ren = document.createElement('button');
 			ren.className = 'act ren';
@@ -779,9 +1925,62 @@ async function loadSessions() {
 		if (!(j.sessions || []).length)
 			sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no sessions in this folder yet' }));
 	} catch (e) {}
+	loadFiles();
+}
+
+/* What the agent has written, where you can reach it. In the browser build the
+   working directory is not a place any file manager can open, so a file is only
+   really yours once it has been saved out. */
+async function loadFiles() {
+	if (!filesEl) return;
+	try {
+		const j = await (await fetch('/api/dirs?path=' + encodeURIComponent(state.dir || '.'))).json();
+		const files = (j.files || []).sort((a, b) => a.name.localeCompare(b.name));
+		filesEl.textContent = '';
+		if (!files.length) {
+			filesEl.appendChild(Object.assign(document.createElement('div'),
+				{ className: 'note', textContent: 'nothing written yet' }));
+			return;
+		}
+		files.slice(0, 60).forEach((f) => {
+			const row = document.createElement('div');
+			row.className = 'sessrow';
+			const b = document.createElement('button');
+			b.className = 'sess';
+			b.title = f.name;
+			b.textContent = f.name;
+			const full = ((state.dir === '/' ? '' : state.dir) || '') + '/' + f.name;
+			/* Native runs against a real disk, where the file is already reachable. */
+			if (isWasm) b.addEventListener('click', () => saveOut(full, f.name));
+			else b.disabled = true;
+			row.appendChild(b);
+			const sz = document.createElement('span');
+			sz.className = 'sub';
+			sz.textContent = fmtSize(f.bytes || 0);
+			row.appendChild(sz);
+			if (isWasm && !state.folder) {
+				const x = document.createElement('button');
+				x.className = 'act del';
+				x.textContent = '×';
+				x.title = 'delete ' + f.name;
+				x.addEventListener('click', async () => {
+					if (!confirm('Delete ' + f.name + '? This cannot be undone.')) return;
+					await post('/api/file/delete', full);
+					loadFiles();
+				});
+				row.appendChild(x);
+			}
+			filesEl.appendChild(row);
+		});
+	} catch (e) {}
 }
 
 /* ---------- event stream ---------- */
+/* Everything the ring replays on connect describes the past. Live events start
+   after a short settle, so a stale prompt cannot pop a box that is already dealt with. */
+let replaying = true;
+setTimeout(() => { replaying = false; }, 1200);
+
 const es = new EventSource('/api/events');
 es.onopen = () => { dot.classList.add('on'); clearLog(); renderMeta(); };
 es.onerror = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
@@ -809,19 +2008,32 @@ es.onmessage = (ev) => {
 				add('turn model', 'hako', m.text || '');
 			}
 			break;
+		case 'input_request':
+			/* Replayed from the ring after a reload? The handshake already told us
+			   whether it is still outstanding — trust that, not the replay. */
+			if (!replaying) askInput(m);
+			break;
 		case 'tool_request': askApproval(m); break;
 		case 'tool_decision': {
 			const box = askBoxes.get(String(m.id));
 			if (box && !box.classList.contains('settled')) settle(box, m.answer);
 			break;
 		}
-		case 'tool_start': add('tool', '', '→ ' + (m.display || 'tool')); break;
-		case 'tool_end':   add('tool', '', '← ' + (m.display || 'done')); break;
+		case 'tool_start': add('tool', '', arrowed('→', m.display || 'tool')); break;
+		case 'tool_end':   add('tool', '', arrowed('←', m.display || 'done')); break;
+		case 'tool_result': {
+			/* What the tool actually returned. A byte count is not an answer to
+			   "what files are in this directory". */
+			const el = add('tool result', '', m.text || '');
+			el.style.whiteSpace = 'pre-wrap';
+			break;
+		}
 		case 'done':
 			state.turns = m.turn || state.turns;
 			renderMeta(); setBusy(false);
 			if (capture) finishCapture();
 			loadSessions();
+			loadFiles();
 			break;
 		case 'error': add('turn error', '', m.text || 'error'); setBusy(false); break;
 	}
@@ -833,8 +2045,9 @@ const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
 
 form.addEventListener('submit', (e) => {
 	e.preventDefault();
+	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
-	if (!text || busy) return;
+	if (!text) return;
 	input.value = ''; input.style.height = 'auto';
 
 	if (UNSAFE.test(text)) {
@@ -848,6 +2061,12 @@ form.addEventListener('submit', (e) => {
 		return;
 	}
 	setBusy(true);
+	if (attached.length && !text.startsWith(':') && !text.startsWith('/')) {
+		flushAttachments().then((paths) => {
+			post('/api/prompt', paths.length ? text + '\n\nfiles: ' + paths.join(' ') : text);
+		});
+		return;
+	}
 	if (text.startsWith(':') || text.startsWith('/')) {
 		post('/api/slash', text);
 		if (CLEARING.test(text)) { clearLog(); post('/api/reset', ''); setBusy(false); }
@@ -855,8 +2074,14 @@ form.addEventListener('submit', (e) => {
 });
 
 input.addEventListener('keydown', (e) => {
-	if (e.key === 'Enter' && !e.shiftKey && window.matchMedia('(hover: hover)').matches) {
-		e.preventDefault(); form.requestSubmit();
+	/* Enter sends, Shift+Enter is a newline — the convention everywhere, and what
+	   a hardware keyboard on a tablet expects. The old rule keyed off (hover:hover)
+	   to detect "desktop", which made Enter insert a newline on an iPad with a
+	   keyboard attached. The on-screen keyboard still offers its own return key
+	   for multi-line input via Shift. */
+	if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+		e.preventDefault();
+		form.requestSubmit();
 	}
 });
 input.addEventListener('input', () => {
@@ -865,15 +2090,54 @@ input.addEventListener('input', () => {
 });
 
 $('burger').addEventListener('click', () => document.body.classList.toggle('nav'));
-$('btn-dir').addEventListener('click', openFolderPicker);
-$('btn-settings').addEventListener('click', openSettings);
-$('btn-new').addEventListener('click', () => { clearLog(); post('/api/slash', ':session new'); post('/api/reset', ''); });
+$('btn-dir').addEventListener('click', () => { closeNav(); openBrowser(); });
+/* Straight to the system picker — the browser's own file sheet is better than
+   anything we can draw, and on iOS it is Files/Photos. Attaching a file that is
+   already on the machine is what the working-directory browser is for. */
+const devicePicker = document.createElement('input');
+devicePicker.type = 'file';
+devicePicker.multiple = true;
+devicePicker.style.display = 'none';
+devicePicker.addEventListener('change', () => {
+	const chosen = Array.from(devicePicker.files || []);
+	if (!chosen.length) return;
+	chosen.forEach((f) => attach(f.name, f));   /* uploaded on send, not on pick */
+	devicePicker.value = '';                    /* so the same file can be re-picked */
+});
+document.body.appendChild(devicePicker);
+$('attach').addEventListener('click', () => devicePicker.click());
+$('btn-settings').addEventListener('click', () => { closeNav(); openSettings(); });
+$('btn-new').addEventListener('click', () => {
+	closeNav(); clearLog(); post('/api/slash', ':session new'); post('/api/reset', '');
+});
 $('btn-restart').addEventListener('click', async () => {
-	clearLog(); add('turn system', '', 'restarting agent…');
+	closeNav(); clearLog(); add('turn system', '', 'reloading this folder…');
 	await post('/api/restart', ''); setBusy(false);
 });
+/* The drawer's scrim is body's own ::after, so a tap that lands on body is a tap
+   outside the drawer. */
+document.addEventListener('click', (e) => {
+	if (e.target === document.body && document.body.classList.contains('nav')) closeNav();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
 
-loadSessions();
+/* The on-screen keyboard shrinks the window without changing any CSS viewport
+   unit, so the composer ends up underneath it. visualViewport is the only thing
+   that reports the real visible box. */
+if (window.visualViewport) {
+	const vv = window.visualViewport;
+	const sync = () => {
+		const open = vv.height < window.innerHeight - 80;
+		document.documentElement.style.setProperty('--vh', vv.height + 'px');
+		document.body.classList.toggle('kb', open);
+		if (open) log.scrollTop = log.scrollHeight;
+	};
+	vv.addEventListener('resize', sync);
+	sync();
+}
+input.addEventListener('focus', () => setTimeout(() => { log.scrollTop = log.scrollHeight; }, 250));
+
+handshake().then(() => { loadSessions(); browserNotice(); });
 </script>
 </body>
 </html>

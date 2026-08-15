@@ -1,5 +1,8 @@
-hako-serve
-hako-serve-asan
+# build inputs and outputs — studio holds sources for the UI only
+hako.c
+hako.wasm
+dist/
+
+.DS_Store
 *.o
 *.dSYM/
-.DS_Store
