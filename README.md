@@ -21,7 +21,28 @@
 
 <br>
 
-<!-- Screenshots live in the website repo (assets/readme-screenshots/hako-studio/) like the other repos. -->
+<!-- Recordings are made locally in recordings/ (gitignored) and published to the
+     website repo, same as the other repos: assets/readme-screenshots/hako-studio/ -->
+<p align="center">
+  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-demo.gif?raw=true" alt="hako studio editing a project" width="86%"/>
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center" width="33%">
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-desktop.png?raw=true" alt="a session with tool calls" width="100%"/><br/>
+      <sub>tool calls as chips · files and sessions per folder</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-themes.gif?raw=true" alt="switching themes" width="100%"/><br/>
+      <sub><code>:theme</code> · four palettes, live swatches</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-settings.png?raw=true" alt="settings panel" width="100%"/><br/>
+      <sub>settings · and a plain answer on where your data lives</sub>
+    </td>
+  </tr>
+</table>
 
 <table>
   <tr>

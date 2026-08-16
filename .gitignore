@@ -3,6 +3,12 @@ hako.c
 hako.wasm
 dist/
 
+# Screen recordings and the stills cut from them. Kept local like the other
+# repos keep their vhs/ — the published assets live in the website repo, at
+# assets/readme-screenshots/hako-studio/.
+recordings/
+*.mov
+
 .DS_Store
 *.o
 *.dSYM/
