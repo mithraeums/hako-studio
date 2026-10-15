@@ -12,3 +12,5 @@ recordings/
 .DS_Store
 *.o
 *.dSYM/
+*.bak
+*.orig

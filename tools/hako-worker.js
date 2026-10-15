@@ -35,8 +35,15 @@ async function boot(wasmUrl) {
 	bootUrl = wasmUrl || bootUrl;
 	// Handles must be resolved before the module runs: everything after this
 	// point is synchronous, by design.
-	globalThis.__hakoRoot = await navigator.storage.getDirectory();
-	device = await opfsStorage();
+	try {
+		globalThis.__hakoRoot = await navigator.storage.getDirectory();
+		device = await opfsStorage();
+	} catch (e) {
+		/* Safari gives a private window no on-device storage, and says so as an
+		   "unknown transient" failure that tells nobody what to do. */
+		throw new Error('this browser gave the page no on-device storage (' + (e && e.name || e) +
+			'). A private window does that — open hako studio in a normal window.');
+	}
 	device.mkdirp(WORKSPACE);
 	storage = mountedStorage(device, null, null);
 	await device.flush();
@@ -345,7 +352,10 @@ self.onmessage = async (ev) => {
 						} catch (e) { /* skip */ }
 					}
 				}
-				out.push({ id, title, mtime: 0, turns, path: p });
+				/* OPFS keeps no mtime; the id starts with its creation time in hex. */
+				const born = parseInt(id.slice(0, 8), 16);
+				if (!title && id !== sessionId) continue;   /* every page load opens one; one with no prompt in it is noise */
+				out.push({ id, title, mtime: born > 1e9 ? born : 0, turns, path: p });
 			}
 			self.postMessage({ type: 'sessions', id: msg.id, sessions: out });
 			return;
@@ -375,6 +385,7 @@ self.onmessage = async (ev) => {
 		}
 	} catch (e) {
 		/* Name the operation: "unknown transient reason" alone is unactionable. */
+		console.error(e && e.stack || e);
 		self.postMessage({ type: 'error',
 			error: (msg.type || 'worker') + ': ' + String(e && e.message || e) });
 	}

@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mithraeums.github.io">
-    <b>hako studio</b>
+    <img src="https://mithraeums.github.io/assets/banner-hako-studio.png" alt="hako studio — the agent in a browser, for every device you own" width="100%"/>
   </a>
 </p>
 
@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.2-b89656?style=flat-square&labelColor=14130f" alt="v0.0.2"/>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-c8c2b2?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
-  <img src="https://img.shields.io/badge/UI-single%20file-c8c2b2?style=flat-square&labelColor=14130f" alt="single file UI"/>
-  <img src="https://img.shields.io/badge/deps-none-c8c2b2?style=flat-square&labelColor=14130f" alt="no dependencies"/>
+  <img src="https://img.shields.io/badge/version-v0.0.3-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.3"/>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
+  <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
+  <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
 </p>
 
 <p align="center">
-  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-code">hako-code</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako">hako (models)</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-edit">hako-edit</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
+  <sub><a href="https://mithraeums.github.io">site</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-code">hako-code</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako">hako (engine)</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums/hako-edit">hako-edit</a> &nbsp;·&nbsp; <a href="CHANGELOG.md">changelog</a> &nbsp;·&nbsp; <a href="https://github.com/mithraeums">org</a></sub>
 </p>
 
 <br>
@@ -35,7 +35,7 @@
     </td>
     <td align="center" width="33%">
       <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-themes.gif?raw=true" alt="switching themes" width="100%"/><br/>
-      <sub><code>:theme</code> · four palettes, live swatches</sub>
+      <sub><code>:theme</code> · the suite's 19 palettes, live</sub>
     </td>
     <td align="center" width="33%">
       <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-settings.png?raw=true" alt="settings panel" width="100%"/><br/>
@@ -93,8 +93,8 @@
   or any folder you add (symlinked into place — never copied, never moved), and `:pull` for the
   rest. Cloud catalogs come from the provider. The browser build lists only what a page can
   reach, so local models and OAuth providers are hidden there rather than offered and broken.
-- **Four themes and a thinking indicator.** Five spinner styles with elapsed time, because a
-  local 3B turn runs for minutes with nothing streamed back. Both persist on your device.
+- **19 themes — the same list as hake and hako, `washi` by default — and a thinking indicator** with elapsed time.
+  Both persist on your device.
 - **Works on a phone.** Drawer navigation, touch targets, keyboard-aware layout, add-to-home-screen.
   Serve it from the machine you are sitting at and drive it from the couch — or open the hosted
   page and let the agent run on the phone itself.
@@ -110,10 +110,18 @@
 
 ```sh
 make            # build hako.wasm and assemble dist/
-make serve      # dist/ on http://localhost:8080
+make serve      # dist/ on http://localhost:8080, nothing cached
+make serve-tls  # the same over self-signed HTTPS, for a phone (OPFS needs a secure context)
 make docker     # container image serving dist/
-make check      # bundle sanity + the wasm behaviour tests
+make test       # bundle sanity, the wasm behaviour tests, theme sync, and the browser test
 ```
+
+`make test` runs `make check` (one file, nothing external, plus node tests of the wasm) and,
+when playwright and a built `../hako-code/hako` are present, `make ui-test`: a headless
+browser drives the page against `hako --serve` and a fake engine — a turn, an approval, a
+picker, uploads, desktop and phone widths, no JS errors.
+
+The hosted page at hako.mithraeum.studio is rebuilt every night from hako-code `main`.
 
 The toolchain is clang. `make toolchain` fetches wasi-sdk (~175 MB) into
 `~/.hako/toolchains`; remove it with `rm -rf`. No emscripten, no npm, no
@@ -206,8 +214,11 @@ Working on the UI itself:
 make dev        # run the agent with the UI served off disk — edit, reload, no rebuild
 make embed      # index.html -> ../hako-code/hako_web.h (what the binary carries)
 make build      # embed, then rebuild the agent
-make check      # bundle sanity: one file, nothing external
 ```
+
+Or from hako-code: `./hako --serve --web ../hako-studio` serves this checkout, and
+`make WEB=1` embeds it. A plain `make` there builds the agent without the UI; `hako --serve`
+then answers `503` and says which of the two to use.
 
 <p align="center"><sub><b>—— III ——</b></sub></p>
 
@@ -230,8 +241,8 @@ knows the file arrived. Add the page to your home screen and it runs chromeless 
 than parking the agent on a stdin nobody can reach.
 
 Type `:` commands exactly as in the CLI — `:trust`, `:usage`, `:sessions`, `:pull <model>`,
-`:help`. Bare `:model`, `:provider` and `:theme` open the browser's own pickers, because the
-CLI's versions read the terminal directly.
+`:help`. Bare `:model`, `:provider` and `:theme` open the page's own pickers; `:sessions` and
+the model's own questions arrive as a choice box — tap an option and the agent carries on.
 
 On a desktop Enter sends and Shift+Enter adds a line; on a touch device Enter is a newline and
 `send` sends. While a turn is running that button becomes `stop`. Under 720px the sidebar is a
@@ -284,7 +295,9 @@ nowhere.
   a network you trust or a VPN.
 - **`--yolo` approves everything**, including shell commands and file writes, with no prompt.
   The approval boxes exist so you don't need it.
-- Cross-origin POSTs are rejected. Session ids are validated against path traversal.
+- Requests must come from this host: the `Origin` and `Host` headers are matched exactly, so a
+  look-alike name (`127.0.0.1.example`) is refused. The `--token` cookie is `SameSite=Strict`,
+  and tokens come from the OS entropy source. Session ids are validated against path traversal.
 - `hako`'s own trust gate still applies: an untrusted directory refuses every tool until
   `:trust`.
 - **In the browser these two are different by necessity.** A wasm turn cannot pause to ask, so
