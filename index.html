@@ -3,8 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#131209">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ece7da">
+<meta name="description" content="The hako coding agent, compiled to WebAssembly and running in your browser tab. No account, no backend, no install; your key goes straight to the provider.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mithraeum">
+<meta property="og:url" content="https://hako.mithraeum.studio/">
+<meta property="og:title" content="hako studio — the agent, in your browser tab">
+<meta property="og:description" content="No account, no backend, no install. Your key goes straight to the provider; your work stays on your device.">
+<meta property="og:image" content="https://hako.mithraeum.studio/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="スタジオ · hako studio, the agent in your browser tab — beside a screenshot of a session">
+<meta name="twitter:card" content="summary_large_image">
 <!-- Added to the home screen, this runs chromeless — which is the point: the
      phone is meant to be a real client, not a page you visit. -->
 <meta name="mobile-web-app-capable" content="yes">
@@ -19,19 +30,19 @@
 <title>hako</title>
 <style>
 	:root {
-		--bg:      #131209;
-		--panel:   #191710;
-		--panel-2: #201d15;
-		--line:    #2e2a20;
-		--line-2:  #3b362a;
-		--bone:    #c8c2b2;
-		--gold:    #b89656;
-		--gold-dim:#8a7040;
-		--phos:    #7a8a3a;
-		--dim:     #6d685c;
-		--faint:   #4c483f;
-		--err:     #b5563f;
-		--ink:     #17150e;
+		--bg:      #ece7da;
+		--panel:   #e4dece;
+		--panel-2: #dad3c1;
+		--line:    #cfc7b3;
+		--line-2:  #b9b09a;
+		--bone:    #1d1c19;
+		--gold:    #2636c4;
+		--gold-dim:#6a76c9;
+		--phos:    #e2402e;
+		--dim:     #5f5a4e;
+		--faint:   #8a8473;
+		--err:     #c2311f;
+		--ink:     #ece7da;
 		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 		--sidebar: 250px;
 	}
@@ -127,6 +138,7 @@
 		color: var(--phos); border-left: 2px solid var(--line-2); padding-left: .6rem;
 		margin: 0 0 .7rem; font-size: 13px; white-space: pre-wrap; word-break: break-word;
 	}
+	.tool.fail { color: var(--err); border-left-color: var(--err); }
 	/* Tool output: quieter than the chip that announced it, but readable. */
 	.tool.result {
 		color: var(--bone); background: var(--panel); border-left-color: var(--gold-dim);
@@ -139,7 +151,7 @@
 	.ask .row { display: flex; flex-wrap: wrap; gap: .4rem; }
 	.ask.settled { border-color: var(--line); opacity: .75; }
 	.ask.settled .row { display: none; }
-	.ask .verdict { color: var(--dim); font-size: 12px; }
+	.ask .verdict { color: var(--dim); font-size: 12px; margin-left: .5rem; }
 
 	/* Attachments sit above the composer, as chips you can drop individually —
 	   the same shape every chat app uses, because it is the one people know. */
@@ -204,7 +216,9 @@
 		background: transparent; color: var(--bone); font: inherit; padding: .4rem .55rem;
 		border-radius: 3px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
-	.opt:hover, .opt.sel { background: var(--panel-2); border-color: var(--gold-dim); color: var(--gold); }
+	.opt.sel { background: var(--panel-2); border-color: var(--gold-dim); color: var(--gold); }
+	/* A touch screen keeps :hover on the last row tapped; styled like .sel, that read as two selected. */
+	@media (hover: hover) { .opt:not(.sel):hover { background: var(--panel); } }
 	.opt .tag { color: var(--phos); font-size: 11px; }
 	.opt .sub { color: var(--faint); font-size: 11px; }
 	.grouplabel {
@@ -292,7 +306,7 @@
 <main>
 	<header>
 		<button class="burger" id="burger">☰</button>
-		<span class="mark">hako</span>
+		<span class="mark"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><g fill="var(--phos)" transform="translate(14 9)"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g><g fill="var(--gold)"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g></svg>hako</span>
 		<span class="dot" id="dot">●</span>
 		<span class="meta" id="meta">connecting…</span>
 	</header>
@@ -704,7 +718,8 @@ if (HAKO_WASM_MODE) {
 		const url = KEY_URL[provider];
 		emit({ type: 'message', role: 'system',
 		       text: 'This runs entirely in your browser, so it needs your own API key. '
-		           + 'It is stored on this device and sent only to ' + provider + '.' });
+		           + 'It is stored on this device and sent only to ' + (provider && provider !== 'none' ? provider : 'the provider you pick') + '.' });
+		if (!provider || provider === 'none') emit({ type: 'message', role: 'system', text: 'Pick a provider first: :provider, or settings.' });
 		if (url) emit({ type: 'message', role: 'system', text: 'Get one here: ' + url });
 		emit({ type: 'input_request', prompt: 'paste your ' + provider + ' API key', hidden: 1 });
 		endTurn();
@@ -744,7 +759,7 @@ const tray = $('tray');
 
 /* ---------- settings: on this device only, never sent anywhere ---------- */
 const SETTINGS_KEY = 'hako.studio.settings';
-const defaults = { theme: 'mithraeum', modelPaths: [], consented: false, spinner: 'braille' };
+const defaults = { theme: 'washi', modelPaths: [], consented: false, spinner: 'braille' };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
 function saveSettings() {
@@ -752,20 +767,29 @@ function saveSettings() {
 }
 
 /* ---------- themes: applied in the page, instantly ---------- */
+/* THEMES:BEGIN — generated by hako-edit/tools/themes.py from hake.c; do not edit */
 const THEMES = {
-	mithraeum: { bg:'#131209', panel:'#191710', 'panel-2':'#201d15', line:'#2e2a20', 'line-2':'#3b362a',
-	             bone:'#c8c2b2', gold:'#b89656', 'gold-dim':'#8a7040', phos:'#7a8a3a',
-	             dim:'#6d685c', faint:'#4c483f', err:'#b5563f', ink:'#17150e' },
-	claude:    { bg:'#1a1614', panel:'#221d1a', 'panel-2':'#2b2421', line:'#362e29', 'line-2':'#453b34',
-	             bone:'#e8e3dd', gold:'#d97757', 'gold-dim':'#a35a41', phos:'#8fa876',
-	             dim:'#8a7f77', faint:'#5f564f', err:'#c9584a', ink:'#1a1614' },
-	nord:      { bg:'#2e3440', panel:'#333b49', 'panel-2':'#3b4252', line:'#434c5e', 'line-2':'#4c566a',
-	             bone:'#e5e9f0', gold:'#88c0d0', 'gold-dim':'#5e81ac', phos:'#a3be8c',
-	             dim:'#8794a8', faint:'#667487', err:'#bf616a', ink:'#2e3440' },
-	mono:      { bg:'#101010', panel:'#171717', 'panel-2':'#1f1f1f', line:'#2b2b2b', 'line-2':'#3a3a3a',
-	             bone:'#d6d6d6', gold:'#ededed', 'gold-dim':'#8a8a8a', phos:'#b8b8b8',
-	             dim:'#8a8a8a', faint:'#5c5c5c', err:'#c06a6a', ink:'#101010' }
+	mithraeum: { bg:'#14130f', panel:'#1b1a16', 'panel-2':'#23211c', line:'#2e2b24', 'line-2':'#3c382f', bone:'#e8e2d2', gold:'#8d99ff', 'gold-dim':'#5d68c2', phos:'#d6c496', dim:'#8a8473', faint:'#5f5a4e', err:'#ff5a4a', ink:'#14130f' },
+	washi: { bg:'#ece7da', panel:'#e4dece', 'panel-2':'#dad3c1', line:'#cfc7b3', 'line-2':'#b9b09a', bone:'#1d1c19', gold:'#2636c4', 'gold-dim':'#6a76c9', phos:'#6b4a2b', dim:'#5f5a4e', faint:'#8a8473', err:'#c2311f', ink:'#ece7da' },
+	dark: { bg:'#1e1e1e', panel:'#252525', 'panel-2':'#2d2d2d', line:'#393939', 'line-2':'#464646', bone:'#d4d4d4', gold:'#569cd6', 'gold-dim':'#427096', phos:'#6a9955', dim:'#6a9955', faint:'#858585', err:'#d0564a', ink:'#1e1e1e' },
+	light: { bg:'#ffffff', panel:'#f6f6f6', 'panel-2':'#ededed', line:'#dddddd', 'line-2':'#cecece', bone:'#1e1e1e', gold:'#0000c8', 'gold-dim':'#5959db', phos:'#008000', dim:'#008000', faint:'#969696', err:'#b3261e', ink:'#ffffff' },
+	gruvbox: { bg:'#282828', panel:'#302f2e', 'panel-2':'#383633', line:'#45433d', 'line-2':'#534f46', bone:'#ebdbb2', gold:'#fb4934', 'gold-dim':'#b13d30', phos:'#b8bb26', dim:'#928374', faint:'#7c6f64', err:'#d0564a', ink:'#282828' },
+	nord: { bg:'#2e3440', panel:'#333b49', 'panel-2':'#3b4252', line:'#434c5e', 'line-2':'#4c566a', bone:'#e5e9f0', gold:'#88c0d0', 'gold-dim':'#5e81ac', phos:'#a3be8c', dim:'#8794a8', faint:'#667487', err:'#bf616a', ink:'#2e3440' },
+	dracula: { bg:'#282a36', panel:'#30323e', 'panel-2':'#393a45', line:'#474952', 'line-2':'#56575f', bone:'#f8f8f2', gold:'#ff79c6', 'gold-dim':'#b45d94', phos:'#f1fa8c', dim:'#6272a4', faint:'#6272a4', err:'#d0564a', ink:'#282a36' },
+	monokai: { bg:'#272822', panel:'#2f302a', 'panel-2':'#383933', line:'#464741', 'line-2':'#555650', bone:'#f8f8f2', gold:'#f92672', 'gold-dim':'#b02756', phos:'#75715e', dim:'#75715e', faint:'#75715e', err:'#d0564a', ink:'#272822' },
+	solarized: { bg:'#002b36', panel:'#052f3a', 'panel-2':'#0a333e', line:'#143b44', 'line-2':'#1d424b', bone:'#839496', gold:'#268bd2', 'gold-dim':'#19699b', phos:'#2aa198', dim:'#586e75', faint:'#586e75', err:'#d0564a', ink:'#002b36' },
+	tokyonight: { bg:'#1a1b26', panel:'#21222e', 'panel-2':'#272937', line:'#333545', 'line-2':'#3f4254', bone:'#c0caf5', gold:'#bb9af7', 'gold-dim':'#836eae', phos:'#9ece6a', dim:'#565f89', faint:'#3c4466', err:'#d0564a', ink:'#1a1b26' },
+	catppuccin: { bg:'#1e1e2e', panel:'#252536', 'panel-2':'#2c2d3e', line:'#383a4c', 'line-2':'#44465a', bone:'#cdd6f4', gold:'#cba6f7', 'gold-dim':'#8e76b1', phos:'#a6e3a1', dim:'#6c7086', faint:'#585b70', err:'#d0564a', ink:'#1e1e2e' },
+	onedark: { bg:'#282c34', panel:'#2d313a', 'panel-2':'#32373f', line:'#3c4049', 'line-2':'#454953', bone:'#abb2bf', gold:'#c678dd', 'gold-dim':'#8f5da2', phos:'#98c379', dim:'#5c6370', faint:'#4c5263', err:'#d0564a', ink:'#282c34' },
+	material: { bg:'#263238', panel:'#2e3a40', 'panel-2':'#364248', line:'#445156', 'line-2':'#525f64', bone:'#eeffff', gold:'#c792ea', 'gold-dim':'#8f70ac', phos:'#c3e88d', dim:'#546e7a', faint:'#3f5158', err:'#d0564a', ink:'#263238' },
+	everforest: { bg:'#2d353b', panel:'#343b3f', 'panel-2':'#3a4144', line:'#464b4c', 'line-2':'#525553', bone:'#d3c6aa', gold:'#e67e80', 'gold-dim':'#a56468', phos:'#a7c080', dim:'#859289', faint:'#566362', err:'#d0564a', ink:'#2d353b' },
+	rosepine: { bg:'#191724', panel:'#211f2c', 'panel-2':'#292735', line:'#373543', 'line-2':'#454352', bone:'#e0def4', gold:'#c4a7e7', 'gold-dim':'#8875a3', phos:'#9ccfd8', dim:'#6e6a86', faint:'#524f67', err:'#d0564a', ink:'#191724' },
+	'github-dark': { bg:'#0d1117', panel:'#15191f', 'panel-2':'#1c2027', line:'#292e34', 'line-2':'#363b42', bone:'#c9d1d9', gold:'#ff7b72', 'gold-dim':'#aa5652', phos:'#8b949e', dim:'#8b949e', faint:'#484f58', err:'#d0564a', ink:'#0d1117' },
+	'github-light': { bg:'#ffffff', panel:'#f6f6f7', 'panel-2':'#edeeee', line:'#dedfe0', 'line-2':'#cfd0d1', bone:'#24292f', gold:'#cf222e', 'gold-dim':'#e06f77', phos:'#6a737d', dim:'#6a737d', faint:'#8c959f', err:'#b3261e', ink:'#ffffff' },
+	ayu: { bg:'#0f1419', panel:'#161b1f', 'panel-2':'#1d2226', line:'#292d31', 'line-2':'#36393c', bone:'#bfbdb6', gold:'#ff8f40', 'gold-dim':'#ab6432', phos:'#aad94c', dim:'#5c6773', faint:'#3c4b5a', err:'#d0564a', ink:'#0f1419' },
+	kanagawa: { bg:'#1f1f28', panel:'#27262e', 'panel-2':'#2e2e34', line:'#3b3b3e', 'line-2':'#494748', bone:'#dcd7ba', gold:'#957fb8', 'gold-dim':'#6c5d86', phos:'#98bb6c', dim:'#727169', faint:'#54546d', err:'#d0564a', ink:'#1f1f28' }
 };
+/* THEMES:END */
 function applyTheme(name) {
 	const t = THEMES[name] || THEMES.mithraeum;
 	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
@@ -992,6 +1016,31 @@ function askApproval(m) {
 	if (m.id) askBoxes.set(String(m.id), box);
 	if (stick) log.scrollTop = log.scrollHeight;
 }
+/* The core asks to pick one: a picker command or the model's ask_user. It
+   waits for the answer, so the box must always answer or be settled. */
+function askChoice(m) {
+	const stick = atBottom();
+	const box = document.createElement('div');
+	box.className = 'ask';
+	const head = document.createElement('span');
+	head.className = 'head'; head.textContent = '● ' + (m.question || 'choose one');
+	const row = document.createElement('div');
+	row.className = 'row';
+	(m.options || []).forEach((o, i) => row.appendChild(mb(o, i ? '' : 'primary', () => {
+		settle(box, o); post('/api/approve', String(i + 1));
+	})));
+	row.appendChild(mb('cancel', '', () => { settle(box, 'cancelled'); post('/api/approve', '0'); }));
+	box.append(head, row);
+	if (spinEl) log.insertBefore(box, spinEl);
+	else log.appendChild(box);
+	if (m.id) askBoxes.set('c' + m.id, box);
+	if (stick) log.scrollTop = log.scrollHeight;
+}
+function settleOpenChoices() {
+	for (const [k, box] of askBoxes)
+		if (k[0] === 'c' && !box.classList.contains('settled')) settle(box, 'closed');
+}
+
 /* The core asks for a line of text — an OAuth code, a yes/no. Without this the
    agent would be waiting on a terminal the browser does not have. */
 let pendingInput = null;
@@ -1687,6 +1736,8 @@ function openSettings() {
 		}, settings.spinner === name));
 	});
 
+	/* The browser build has no engine and no disk to search: only --serve can use this. */
+	if (!isWasm) {
 	m.body.appendChild(groupLabel('where to look for model weights'));
 	const note = document.createElement('div');
 	note.className = 'note';
@@ -1709,6 +1760,7 @@ function openSettings() {
 	});
 	addWrap.appendChild(addInp);
 	m.body.appendChild(addWrap);
+	}
 
 	m.body.appendChild(groupLabel('your data'));
 	const priv = document.createElement('div');
@@ -2014,13 +2066,19 @@ es.onmessage = (ev) => {
 			if (!replaying) askInput(m);
 			break;
 		case 'tool_request': askApproval(m); break;
+		case 'choice_request': askChoice(m); break;
+		case 'choice_decision': {
+			const box = askBoxes.get('c' + m.id);
+			if (box && !box.classList.contains('settled')) settle(box, 'answered');
+			break;
+		}
 		case 'tool_decision': {
 			const box = askBoxes.get(String(m.id));
 			if (box && !box.classList.contains('settled')) settle(box, m.answer);
 			break;
 		}
 		case 'tool_start': add('tool', '', arrowed('→', m.display || 'tool')); break;
-		case 'tool_end':   add('tool', '', arrowed('←', m.display || 'done')); break;
+		case 'tool_end':   add(/^error:/.test(m.display || '') ? 'tool fail' : 'tool', '', arrowed('←', m.display || 'done')); break;
 		case 'tool_result': {
 			/* What the tool actually returned. A byte count is not an answer to
 			   "what files are in this directory". */
@@ -2031,6 +2089,7 @@ es.onmessage = (ev) => {
 		case 'done':
 			state.turns = m.turn || state.turns;
 			renderMeta(); setBusy(false);
+			settleOpenChoices();
 			if (capture) finishCapture();
 			loadSessions();
 			loadFiles();

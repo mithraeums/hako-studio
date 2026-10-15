@@ -189,8 +189,11 @@ export function hakoImports({ memory, storage, log }) {
 		hkjs_fs_read(pathPtr, outPtrPtr, outLenPtr) {
 			const text = storage.read(norm(readStr(pathPtr)));
 			if (text === null || text === undefined) return -1;
+			/* writeStr allocates, and an allocation can grow memory — which detaches
+			   every view made before it. Take the view after. */
+			const ptr = writeStr(text);
 			const dv = view();
-			dv.setUint32(outPtrPtr, writeStr(text), true);
+			dv.setUint32(outPtrPtr, ptr, true);
 			dv.setUint32(outLenPtr, enc.encode(text).length, true);
 			return 0;
 		},

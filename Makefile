@@ -32,13 +32,16 @@ WASI_URL   ?= https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk
 CC_WASM    ?= $(WASI_DIR)/bin/clang
 SYSROOT    ?= $(WASI_DIR)/share/wasi-sysroot
 
-CFLAGS_WASM = --target=wasm32-wasip1 --sysroot=$(SYSROOT) -O2 \
+# -Os + --strip-all: 489 KB -> 201 KB (gzip 152 -> 86) for every phone that opens the page.
+# The agent waits on the network in a tab, so -Os costs nothing anyone can see; the
+# stripped names section is only debug symbols (exports are kept by --export).
+CFLAGS_WASM = --target=wasm32-wasip1 --sysroot=$(SYSROOT) -Os -Wl,--strip-all \
               -D_WASI_EMULATED_GETPID -lwasi-emulated-getpid \
               -Wl,--export=main -Wl,--export=malloc -Wl,--export=free \
               -Wl,--allow-undefined \
               -Wl,-z,stack-size=4194304 -Wl,--stack-first
 
-.PHONY: all fetch toolchain wasm site serve serve-tls docker check embed build dev clean distclean
+.PHONY: all fetch toolchain wasm site serve serve-tls docker check embed build dev clean distclean ui-test test
 
 all: site
 
@@ -93,13 +96,15 @@ site: wasm
 	echo "build stamp $$stamp"
 	@cp hako.wasm tools/hako-glue.js tools/hako-worker.js $(DIST)/
 	@cp icon-180.png $(DIST)/ 2>/dev/null || true
-	@printf '%s\n' '{"name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#131209","theme_color":"#131209","icons":[{"src":"/icon-180.png","sizes":"180x180","type":"image/png","purpose":"any maskable"}]}' > $(DIST)/manifest.webmanifest
+	@cp og.png $(DIST)/ 2>/dev/null || true      # the share-preview tile
+	@printf '%s\n' '{"name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#ece7da","theme_color":"#ece7da","icons":[{"src":"/icon-180.png","sizes":"180x180","type":"image/png","purpose":"any maskable"}]}' > $(DIST)/manifest.webmanifest
 	@echo "dist/ ready — static files, no backend:"
 	@ls -la $(DIST) | tail -n +2 | awk 'NF>3 {printf "  %-24s %8s\n", $$9, $$5}'
 
+# No caching: a stale worker or wasm under a fresh page reads as a logic bug.
 serve: site
 	@echo "http://localhost:$(PORT)   (ctrl-c to stop)"
-	@cd $(DIST) && python3 -m http.server $(PORT)
+	@python3 tools/serve-static.py $(DIST) $(PORT)
 
 # HTTPS, because the browser build needs a secure context: OPFS and workers are
 # unavailable over plain HTTP to anything but localhost. Self-signed, for testing
@@ -139,6 +144,7 @@ check:
 	echo "index.html: $$(wc -c < index.html | tr -d ' ') bytes"; \
 	if command -v node >/dev/null 2>&1; then \
 		node tools/smoke.js index.html || fail=1; \
+		node tools/glue-test.js || fail=1; \
 		node tools/history-test.js >/dev/null 2>&1 || echo "(history test skipped — no stored sessions)"; \
 		if [ -f hako.wasm ] || [ -f $(DIST)/hako.wasm ]; then node tools/session-test.js || fail=1; \
 		else echo "(session test skipped — no wasm built)"; fi; \
@@ -158,3 +164,14 @@ clean:
 
 distclean: clean
 	rm -f $(HAKO_SRC)
+
+# Every check this repo has. ui-test needs playwright and a built ../hako-code/hako.
+test: check
+	@if [ -f ../hako-edit/tools/themes.py ]; then python3 ../hako-edit/tools/themes.py --check; else echo "themes: no ../hako-edit checkout — skipped"; fi
+	@if python3 -c 'import playwright' 2>/dev/null && [ -x ../hako-code/hako ]; then \
+		$(MAKE) --no-print-directory ui-test; \
+	else echo "ui-test: skipped (needs playwright and a built ../hako-code/hako)"; fi
+
+# Browser test against a built ../hako-code/hako and its fake engine (needs playwright)
+ui-test:
+	python3 tools/ui-test.py
