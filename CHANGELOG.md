@@ -4,7 +4,7 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
-## [Unreleased]
+## [v0.0.6] - 2026-10-23
 
 ### fixed
 - a home-screen app on iOS still left a strip under the composer: there `innerHeight` is a status bar short too, so it sizes to the screen
