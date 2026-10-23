@@ -55,7 +55,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define RELAY_VERSION "0.0.1"
+#define RELAY_VERSION "0.0.2"
 #define MAX_DEV    4096
 #define MAX_CHAL   512
 #define MAX_IP     1024
@@ -451,7 +451,7 @@ static void send_all(int fd, const char *b, size_t n) {
 
 /* The studio page is another origin (static hosting); only it may call us
    from a browser. */
-static char cors[300];
+static char cors[320];
 
 static void reply(int fd, const char *status, const char *body) {
 	char head[640];
@@ -1205,7 +1205,7 @@ static void route_name(int fd, Body *b, Dev *d, const char *acct) {
 	pthread_mutex_lock(&slock);
 	for (int i = 0; i < MAX_BIND; i++)
 		if (binds[i].used && !strcmp(binds[i].pub, pub) && !strcmp(binds[i].acct, acct)) {
-			snprintf(binds[i].name, sizeof binds[i].name, "%s", line);
+			snprintf(binds[i].name, sizeof binds[i].name, "%.256s", line);
 			ok = store_save() == 0;
 			break;
 		}
@@ -1292,7 +1292,7 @@ static void *conn_thread(void *arg) {
 		                 "Content-Length: 0\r\nConnection: close\r\n\r\n", cors);
 		send_all(fd, head, (size_t)n);
 	}
-	else if (!strncmp(req, "GET /v1/health ", 15)) reply(fd, "200 OK", "ok\n");
+	else if (!strncmp(req, "GET /v1/health ", 15)) reply(fd, "200 OK", mailer[0] || dev_mode ? "ok mail\n" : "ok\n");   /* mail: email codes work */
 	else if (!strncmp(req, "POST /v1/auth/challenge ", 24)) route_challenge(fd, &b, ip);
 	else if (!strncmp(req, "POST /v1/auth/prove ", 20)) route_prove(fd, &b, ip);
 	else if (!strncmp(req, "GET /v1/", 8) || !strncmp(req, "POST /v1/", 9)) {

@@ -60,7 +60,7 @@
 	   100% leaves the composer under the URL bar. --vh is set from visualViewport
 	   for the keyboard case, which no CSS unit tracks. */
 	@supports (height: 100dvh) { html, body { height: 100dvh; } }
-	body.kb { height: var(--vh, 100dvh); }
+	body { height: var(--vh, 100dvh); }
 	button, .sess, .opt { touch-action: manipulation; }   /* no double-tap zoom */
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
@@ -265,11 +265,10 @@
 		aside {
 			position: fixed; inset: 0 auto 0 0; z-index: 30; width: min(84vw, 320px);
 			transform: translateX(-100%); transition: transform .16s ease;
-			box-shadow: 0 0 40px rgba(0,0,0,.6);
 			padding-left: env(safe-area-inset-left);
 			padding-bottom: env(safe-area-inset-bottom);
 		}
-		body.nav aside { transform: none; }
+		body.nav aside { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.6); }
 		body.nav::after {                      /* tap-anywhere-else closes the drawer */
 			content: ''; position: fixed; inset: 0; z-index: 29; background: rgba(4,4,2,.55);
 		}
@@ -414,14 +413,16 @@ const kvSet = (k, v) => kv('readwrite', (st) => st.put(v, k));
 const kvClear = () => kv('readwrite', (st) => st.clear());
 
 const relay = {
-	token: '', id: '', acct: '', s: null,
+	token: '', id: '', acct: '', s: null, at: 0,
 	async req(method, path, body) {
 		const headers = this.token ? { Authorization: 'Bearer ' + this.token } : {};
 		const r = await fetch(RELAY_URL + path, { method, headers, body: method === 'POST' ? (body || '') : undefined });
 		return { status: r.status, text: (await r.text()).trim() };
 	},
-	/* the device key proves itself: MAC keyed by X25519(s, the relay's one-off key) */
+	/* the device key proves itself: MAC keyed by X25519(s, the relay's one-off key).
+	   A token lives an hour on the relay; reuse it for ten minutes, since sign-ins are rate limited. */
 	async signIn() {
+		if (this.token && Date.now() - this.at < 600000) return;
 		await hk.load();
 		this.s = await kvGet('device');
 		if (!this.s) { this.s = hk.random(32); await kvSet('device', this.s); }
@@ -436,7 +437,7 @@ const relay = {
 		const p = await this.req('POST', '/v1/auth/prove', cid + ' ' + hex(hk.out(32)));
 		if (p.status !== 200) throw new Error('sign-in didn\u2019t work, try again');
 		const [tok, id, acct] = p.text.split(' ');
-		this.token = tok; this.id = id; this.acct = acct === '-' ? '' : acct;
+		this.token = tok; this.id = id; this.acct = acct === '-' ? '' : acct; this.at = Date.now();
 	},
 	async send(to, frame) {
 		const r = await this.req('POST', '/v1/up', to + ' ' + b64(frame) + '\n');
@@ -515,6 +516,11 @@ async function passkeyCreate(invite) {
 	return { acct: relay.acct, K, prf: !!prf };
 }
 
+/* Email codes only when the relay has a mailer (its health line says so). */
+async function relayMail() {
+	try { return /\bmail\b/.test(await (await fetch(RELAY_URL + '/v1/health')).text()); } catch (e) { return false; }
+}
+
 async function emailStart(addr) {
 	const r = await relay.req('POST', '/v1/email/start', addr.trim());
 	if (r.status !== 200) throw new Error(r.status === 400 ? 'that address does not look right' : r.text || 'could not send a code');
@@ -549,9 +555,10 @@ async function linkComputer(pubHex, secretHex) {
 /* The account's open code sessions: each seals "code:<host>\t<folder>" under
    K, so only a device holding K can tell a session from a browser, or read it. */
 async function codeSessions() {
-	const r = await relay.req('GET', '/v1/devices');
 	const K = await kvGet('k');
-	if (r.status !== 200 || !K) return [];
+	if (!relay.acct || !K) return [];
+	const r = await relay.req('GET', '/v1/devices');
+	if (r.status !== 200) return [];
 	const out = [];
 	for (const l of r.text.split('\n').filter(Boolean)) {
 		const [id, , online, sealed] = l.split(' ');
@@ -726,14 +733,20 @@ window.hakoAccount = {
 				location.hash = '#remote=' + c.id; location.reload();
 			}, c.id === REMOTE_ID));
 			const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
-			btn('sign out here', async () => { await kvClear(); m.close(); });
+			btn('sign out here', async () => { await kvClear(); relay.token = ''; relay.acct = ''; m.close(); });
 			btn('close', m.close);
 		};
 		if (relay.acct && (await kvGet('k'))) return signedIn();
-		say(relay.acct ? 'unlock your account on this browser:' : 'sign in to reach your code sessions from here: face id or a fingerprint, or a code by email.');
+		const invited = INVITE || linkTo;
+		if (relay.acct) say('unlock your account on this browser:');
+		else {
+			say('code sessions are a closed beta. with an account, any browser you sign in to can drive hako on your computers, one session per folder, and every tool still asks you first.');
+			say('an account keeps only a random id, your passkey\u2019s public key, your account key locked by that passkey, and your devices\u2019 public keys and sealed names. never your chats, files, prompts or provider keys: those go between your own devices, encrypted end to end.');
+			if (!invited) say('without one, chat runs in this browser and keeps its history on this device.');
+		}
 		const inv = field('invite code');
 		inv.value = INVITE;
-		inv.hidden = !INVITE && !linkTo;
+		inv.hidden = !invited;
 		btn('sign in with a passkey', async () => {
 			try {
 				let r = null;
@@ -743,16 +756,23 @@ window.hakoAccount = {
 			} catch (e) { fail(e); }
 		}, m.body);
 		if (!inv.hidden) btn(INVITE ? 'create your account' : 'new account (invite)', async () => { try { await passkeyCreate(inv.value.trim()); signedIn(); } catch (e) { fail(e); } }, m.body);
-		const mail = field('or email', 'email');
-		const code = field('six-digit code');
-		code.hidden = true;
-		const send = btn('email me a code', async () => {
-			try {
-				if (code.hidden) { await emailStart(mail.value); code.hidden = false; send.textContent = 'sign in'; say('sent. it works for ten minutes.'); return; }
-				await emailVerify(code.value, inv.value);
-				signedIn();
-			} catch (e) { fail(e); }
-		}, m.body);
+		if (await relayMail()) {
+			const mail = field('or email', 'email');
+			const code = field('six-digit code');
+			code.hidden = true;
+			const send = btn('email me a code', async () => {
+				try {
+					if (code.hidden) { await emailStart(mail.value); code.hidden = false; send.textContent = 'sign in'; say('sent. it works for ten minutes.'); return; }
+					await emailVerify(code.value, inv.value);
+					signedIn();
+				} catch (e) { fail(e); }
+			}, m.body);
+		}
+		/* asking for access is an email from the person's own mail app: nothing is kept here */
+		if (!relay.acct && !invited) btn('request access', () => {
+			location.href = 'mailto:contact@mithraeum.studio?subject=' + encodeURIComponent('hako code access') +
+				'&body=' + encodeURIComponent('i would like to try code sessions in hako studio.');
+		});
 		btn('close', m.close);
 	},
 	/* Nobody sees any of this until they are signed in, invited (#invite=),
@@ -763,24 +783,35 @@ window.hakoAccount = {
 		$('mode-chat').classList.toggle('on', !REMOTE_ID);
 		$('mode-code').classList.toggle('on', !!REMOTE_ID);
 		const go = (id) => { location.hash = '#remote=' + id; location.reload(); };
-		$('mode-chat').addEventListener('click', () => { closeNav(); if (REMOTE_ID) { location.hash = ''; location.reload(); } });
-		/* code: straight back to the last project if it is still open, else the list */
-		$('mode-code').addEventListener('click', async () => {
-			if (REMOTE_ID) return;
-			closeNav();
-			const last = await kvGet('lastCode');
-			try { await relay.signIn(); } catch (e) { return this.open(); }
-			const list = await codeSessions();
-			if (last && list.some((c) => c.id === last)) go(last); else this.open();
+		const pick = (code) => { $('mode-chat').classList.toggle('on', !code); $('mode-code').classList.toggle('on', code); };
+		/* chat and code both keep the menu open and swap what it lists */
+		$('mode-chat').addEventListener('click', () => {
+			if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
+			$('projects').hidden = true; pick(false);
 		});
-		/* in code, the menu lists the projects (each a shared folder) to move between */
+		/* code lists the open code sessions (each a shared folder) right in the menu */
 		const projects = async () => {
 			const list = await codeSessions(), el = $('project-list');
 			el.textContent = '';
 			for (const c of list) el.appendChild(optionRow(c.name, c.host, '', () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }, c.id === REMOTE_ID));
-			$('projects').hidden = !list.length;
+			el.appendChild(optionRow('+ add a device', '', '', () => { closeNav(); addDevice(); }));
+			$('projects').hidden = false;
 		};
-		$('modes').hidden = !(REMOTE_ID || ((await kvGet('acct')) && (await kvGet('k'))));
+		const addDevice = () => {
+			const m = modal('add a device');
+			for (const t of ['on your computer, in the folder you want to reach: run hako, then :remote on.',
+			                 'the first time, it opens a page to link that computer to your account. after that, each folder you share shows up under code, one session each, until :remote off.']) {
+				const n = document.createElement('div'); n.className = 'note'; n.textContent = t; m.body.appendChild(n);
+			}
+			const b = document.createElement('button'); b.textContent = 'close'; b.addEventListener('click', m.close); m.foot.appendChild(b);
+		};
+		$('mode-code').addEventListener('click', async () => {
+			try { await relay.signIn(); } catch (e) { closeNav(); return this.open(); }
+			if (!relay.acct || !(await kvGet('k'))) { closeNav(); return this.open(); }
+			pick(true);
+			await projects();
+		});
+		$('modes').hidden = false;
 		/* a code session lives in its folder: no browsing to another one from here */
 		if (REMOTE_ID) $('btn-dir').hidden = true;
 		if (HASH === '#signin' || INVITE) { history.replaceState(null, '', location.pathname); this.open(); }
@@ -791,7 +822,7 @@ window.hakoAccount = {
 		});
 		if (LINK) this.open(LINK);
 		if (REMOTE_ID) {
-			remote.ready.then(() => { kvSet('lastCode', REMOTE_ID); projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
+			remote.ready.then(() => { projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
 				.catch((e) => { const m = modal('could not reach that computer'); const n = document.createElement('div'); n.className = 'note'; n.textContent = e.message; m.body.appendChild(n);
 					const b = document.createElement('button'); b.textContent = 'back to this browser'; b.addEventListener('click', () => { location.hash = ''; location.reload(); }); m.foot.appendChild(b); });
 		}
@@ -1333,7 +1364,9 @@ function add(cls, who, text) {
 	if (stick) log.scrollTop = log.scrollHeight;
 	return el;
 }
+let metaHold = 0;                     /* a flashStatus word is showing until then */
 function renderMeta() {
+	if (Date.now() < metaHold) return;
 	meta.textContent = '';
 	if (state.provider) {
 		const b = document.createElement('b');
@@ -1428,12 +1461,20 @@ function modal(title) {
 	foot.className = 'foot';
 	box.append(h, body, foot);
 	scrim.appendChild(box);
-	const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
-	function onKey(e) { if (e.key === 'Escape') close(); }
+	const m = { scrim, box, title: h, body, foot, onclose: null };
+	m.close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); if (m.onclose) m.onclose(); };
+	function onKey(e) { if (e.key === 'Escape') m.close(); }
 	document.addEventListener('keydown', onKey);
-	scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+	scrim.addEventListener('click', (e) => { if (e.target === scrim) m.close(); });
 	document.body.appendChild(scrim);
-	return { scrim, box, title: h, body, foot, close };
+	return m;
+}
+
+/* A word in the header's status line for a moment, never in the chat. */
+function flashStatus(text) {
+	meta.textContent = text;
+	metaHold = Date.now() + 2500;
+	setTimeout(() => { metaHold = 0; renderMeta(); }, 2500);
 }
 function optionRow(label, sub, tag, onClick, current) {
 	const b = document.createElement('button');
@@ -2157,14 +2198,25 @@ function openSettings() {
 		m.close(); openProviderPicker();
 	}));
 
+	/* Tapping through themes previews them; closing settings keeps the last one,
+	   says so in the status line, and (under --serve) keeps the CLI in step. */
 	m.body.appendChild(groupLabel('theme'));
+	const themeWas = settings.theme, themeRows = [];
+	m.onclose = () => {
+		if (settings.theme === themeWas) return;
+		if (!HAKO_WASM_MODE) post('/api/theme', settings.theme);
+		flashStatus('theme: ' + settings.theme);
+	};
 	Object.keys(THEMES).forEach((name) => {
 		const t = THEMES[name];
 		const b = optionRow(name, '', '', () => {
 			applyTheme(name);
-			post('/api/slash', ':theme ' + name);   /* keep the CLI in step */
-			m.close(); openSettings();
+			for (const [n, row, label] of themeRows) {
+				row.classList.toggle('sel', n === name);
+				label.nodeValue = (n === name ? '\u25ce ' : '  ') + n;
+			}
 		}, settings.theme === name);
+		themeRows.push([name, b, b.firstChild]);
 		['bg', 'gold', 'phos', 'bone'].reverse().forEach((k) => {
 			const sw = document.createElement('span');
 			sw.className = 'swatch';
@@ -2638,17 +2690,18 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
 
 /* The on-screen keyboard shrinks the window without changing any CSS viewport
-   unit, so the composer ends up underneath it. visualViewport is the only thing
-   that reports the real visible box. */
+   unit, so the composer ends up underneath it, and a home-screen app on iOS
+   sizes 100dvh a status bar short. visualViewport reports the real visible box. */
 if (window.visualViewport) {
 	const vv = window.visualViewport;
 	const sync = () => {
 		const open = vv.height < window.innerHeight - 80;
-		document.documentElement.style.setProperty('--vh', vv.height + 'px');
+		document.documentElement.style.setProperty('--vh', (open ? vv.height : window.innerHeight) + 'px');
 		document.body.classList.toggle('kb', open);
 		if (open) log.scrollTop = log.scrollHeight;
 	};
 	vv.addEventListener('resize', sync);
+	window.addEventListener('resize', sync);
 	sync();
 }
 input.addEventListener('focus', () => setTimeout(() => { log.scrollTop = log.scrollHeight; }, 250));

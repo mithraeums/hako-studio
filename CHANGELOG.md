@@ -4,6 +4,17 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
+## [v0.0.5] - 2026-10-23
+
+### changed
+- **☰ → code lists your code sessions right in the menu**, with **+ add a device** (how to share a folder with `:remote on`), instead of a popup on every tap. signed out, the menu still offers chat · code: a home-screen app starts with nothing stored and had no way in
+- **signing in says what the beta is.** code sessions are a closed beta; the sheet says what an account keeps (a random id, your passkey's public key, your account key locked by it, your devices' public keys and sealed names) and what it never does (chats, files, prompts, provider keys). without an account, chat runs in this browser and keeps its history there. **request access** opens your mail app to contact@mithraeum.studio; nothing is kept. email codes show only when the relay can send them
+- **themes preview as you tap them**; closing settings keeps the last one and says so in the status line, never in the chat (it used to post `:theme` per tap, each one a chat line)
+
+### fixed
+- a home-screen app on iOS sized the page a status bar short (a strip under the composer), and the closed menu's shadow showed down the left edge
+- the page signs in to the relay once per ten minutes instead of on every tap (sign-ins are rate limited)
+
 ## [v0.0.4] - 2026-10-22
 
 ### added
