@@ -1,0 +1,14 @@
+# relay.mithraeum.studio: TLS here, the relay on loopback. No `log` directive,
+# so Caddy keeps no access log: no IPs at rest (RELAY.md §6).
+# Only /v1/ reaches the relay; a person who types the name lands on the studio.
+relay.mithraeum.studio {
+	header -Server
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8790 {
+			flush_interval -1
+		}
+	}
+	handle {
+		redir https://hako.mithraeum.studio 302
+	}
+}

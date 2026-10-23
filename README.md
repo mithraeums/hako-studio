@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.3-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.3"/>
+  <img src="https://img.shields.io/badge/version-v0.0.4-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.4"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -95,6 +95,11 @@
   reach, so local models and OAuth providers are hidden there rather than offered and broken.
 - **19 themes — the same list as hake and hako, `washi` by default — and a thinking indicator** with elapsed time.
   Both persist on your device.
+- **Your code sessions, from anywhere** *(invite beta)*. Run `:remote on` in a terminal hako
+  and sign in at hako.mithraeum.studio on any device: ☰ → code lists the sessions running on
+  your computers, one per shared folder, and opening one turns the page into that session.
+  Every byte is sealed in the tab (Noise, by `hako.wasm`) and opened only by your computer; the
+  relay in between routes ciphertext and keeps no chats. Details below.
 - **Works on a phone.** Drawer navigation, touch targets, keyboard-aware layout, add-to-home-screen.
   Serve it from the machine you are sitting at and drive it from the couch — or open the hosted
   page and let the agent run on the phone itself.
@@ -163,9 +168,39 @@ carrying it once, which the browser exchanges for a cookie:
 hako --serve --lan --token --dir ~/code/my-project
 ```
 
-That is also what makes it safe to reach your own machine from anywhere through
-a tunnel — `cloudflared tunnel --url http://localhost:8787` gives an HTTPS URL
-with no ports opened and no account.
+Off your own network, use `:remote on` (below) or `tailscale serve`, which stays private
+to your tailnet with real HTTPS. Avoid `tailscale funnel` and hosted tunnels: funnel puts the
+agent on the public internet, and a tunnel's servers end the TLS and can read everything.
+
+### From anywhere: `:remote on`
+
+Inside a terminal hako, in the folder you want to share:
+
+```
+:remote on
+```
+
+The first time, a page opens to link this computer to your account (a passkey, or a code sent
+to your email; accounts are invite-only for now). After that, sign in at
+**hako.mithraeum.studio** on a phone or another computer and ☰ → **code** lists what is
+running: one session per shared folder, named by folder and machine. Open one and you are in
+the same chat as the terminal. Tools still ask, answered from whichever side is first;
+`:auto`, `:trust` and the rest stay at the desk. `:remote off` ends it.
+
+How it holds together:
+
+- **The account key never leaves your devices in the clear.** It is made in the browser, wrapped
+  by the passkey's PRF output, and handed to the computer once, sealed, over the link page.
+- **Sessions are end to end.** `Noise_XXpsk3_25519_ChaChaPoly_BLAKE2b`, with a pre-shared key
+  derived from the account key, so only a device on your account can complete the handshake.
+- **The relay routes ciphertext.** It holds an account id, how you sign in (a passkey's public
+  key, or a keyed hash of your email, never the address), the wrapped account key, and your
+  devices' public keys and sealed names. No chats, no content, no request logs.
+
+The relay is in [`relay/`](relay): one C file and libcrypto, GPL-3.0 like the rest.
+`make test` there runs its tests and hako's against it; `make remote-test` here runs the whole
+path in Chromium and WebKit. To use your own, point hako at it with `HAKO_RELAY_URL` (and
+`HAKO_STUDIO_URL` for the page) and build the page with `make site RELAY_URL=…`.
 
 ### Serving to a phone on macOS
 
@@ -226,6 +261,7 @@ then answers `503` and says which of the two to use.
 
 | Area | What it does |
 |---|---|
+| **☰ chat · code** | chat is this browser's own agent; code lists your code sessions (signed in only) and returns to the last one |
 | **sidebar** | working directory · `open folder…` · settings · sessions in this folder · new session · reload |
 | **session row** | click to resume with full transcript; `✎` renames it; `×` deletes the stored jsonl |
 | **approval box** | `allow once` · `deny` · `always` — answered boxes stay settled across a reload |
@@ -262,6 +298,7 @@ Running from the binary, on that machine's disk:
 ~/.hako/credentials                        provider keys and OAuth tokens
 ~/.hako/models/<id>/<id>.mlf2              local weights
 browser localStorage                       theme, spinner, model search paths
+browser IndexedDB (hako-account)           when signed in: this device's key and your account key
 ```
 
 Running in a browser, in that origin's private storage — the same paths, in a
@@ -283,6 +320,11 @@ The server holds nothing. It keeps a 2048-event replay buffer in memory so a rel
 the current view, and that is all — no logging, no history of its own, nothing written to disk
 that `hako` did not write.
 
+With `:remote on`, the relay holds what the account needs to work and nothing else: a random
+account id, your passkey's public key or a keyed hash of your email, the passkey-wrapped account
+key, device public keys and their sealed names. The computer keeps its keys in `~/.hako/remote`
+and `<project>/remote` (both 0600).
+
 What you send to a **cloud** model goes to that provider under your own key. Local models go
 nowhere.
 
@@ -298,6 +340,9 @@ nowhere.
 - Requests must come from this host: the `Origin` and `Host` headers are matched exactly, so a
   look-alike name (`127.0.0.1.example`) is refused. The `--token` cookie is `SameSite=Strict`,
   and tokens come from the OS entropy source. Session ids are validated against path traversal.
+- **Remote devices get less than the desk.** Over `:remote on` or `--serve --token` every tool
+  asks (auto mode is ignored, "always" counts once), `:auto`, `:trust`, `:mcp` and
+  `:skill install` are refused, and folders stay inside the one hako was started in.
 - `hako`'s own trust gate still applies: an untrusted directory refuses every tool until
   `:trust`.
 - **In the browser these two are different by necessity.** A wasm turn cannot pause to ask, so

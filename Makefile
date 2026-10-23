@@ -41,7 +41,7 @@ CFLAGS_WASM = --target=wasm32-wasip1 --sysroot=$(SYSROOT) -Os -Wl,--strip-all \
               -Wl,--allow-undefined \
               -Wl,-z,stack-size=4194304 -Wl,--stack-first
 
-.PHONY: all fetch toolchain wasm site serve serve-tls docker check embed build dev clean distclean ui-test test
+.PHONY: all fetch toolchain wasm site serve serve-tls docker check embed build dev clean distclean ui-test remote-test test
 
 all: site
 
@@ -92,6 +92,7 @@ site: wasm
 	sed -e "s|<title>hako</title>|<meta name=\"hako-mode\" content=\"wasm\"><meta name=\"hako-build\" content=\"$$stamp\"><title>hako</title>|" \
 	    -e "s|new Worker('hako-worker.js'|new Worker('hako-worker.js?v=$$stamp'|" \
 	    -e "s|wasmUrl: 'hako.wasm'|wasmUrl: 'hako.wasm?v=$$stamp'|" \
+	    $(if $(RELAY_URL),-e "s|<title>hako</title>|<meta name=\"hako-relay\" content=\"$(RELAY_URL)\"><title>hako</title>|") \
 	    index.html > $(DIST)/index.html; \
 	echo "build stamp $$stamp"
 	@cp hako.wasm tools/hako-glue.js tools/hako-worker.js $(DIST)/
@@ -175,3 +176,10 @@ test: check
 # Browser test against a built ../hako-code/hako and its fake engine (needs playwright)
 ui-test:
 	python3 tools/ui-test.py
+
+# The relay end to end: a virtual passkey links a real `hako` (:remote on in a
+# pty) through a real relay, then a fresh browser signs in and drives a turn.
+remote-test:
+	@$(MAKE) --no-print-directory -C relay relay
+	@$(MAKE) --no-print-directory site RELAY_URL=http://127.0.0.1:18793
+	python3 tools/remote-test.py

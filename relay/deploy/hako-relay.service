@@ -1,0 +1,40 @@
+# the hako relay (RELAY.md §6, RELAY-SERVER.md). Loopback only; Caddy does TLS.
+[Unit]
+Description=hako relay: end-to-end-encrypted frames between your devices
+After=network.target
+
+[Service]
+User=hako-relay
+Group=hako-relay
+ExecStart=/usr/local/bin/hako-relay -p 8790 -d /var/lib/hako-relay -o https://hako.mithraeum.studio
+StateDirectory=hako-relay
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=4096
+# nothing it does needs more than its own state directory and the network
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
