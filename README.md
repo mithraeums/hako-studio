@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.4-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.4"/>
+  <img src="https://img.shields.io/badge/version-v0.0.5-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.5"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -168,9 +168,9 @@ carrying it once, which the browser exchanges for a cookie:
 hako --serve --lan --token --dir ~/code/my-project
 ```
 
-Off your own network, use `:remote on` (below) or `tailscale serve`, which stays private
-to your tailnet with real HTTPS. Avoid `tailscale funnel` and hosted tunnels: funnel puts the
-agent on the public internet, and a tunnel's servers end the TLS and can read everything.
+Off your own network, use `:remote on` (below). Avoid hosted tunnels and open ports: a
+tunnel's servers end the TLS and can read everything, and an open port puts the agent on the
+public internet.
 
 ### From anywhere: `:remote on`
 
@@ -180,8 +180,8 @@ Inside a terminal hako, in the folder you want to share:
 :remote on
 ```
 
-The first time, a page opens to link this computer to your account (a passkey, or a code sent
-to your email; accounts are invite-only for now). After that, sign in at
+The first time, a page opens to link this computer to your account (a passkey; accounts are
+invite-only for now, ask at contact@mithraeum.studio). After that, sign in at
 **hako.mithraeum.studio** on a phone or another computer and ☰ → **code** lists what is
 running: one session per shared folder, named by folder and machine. Open one and you are in
 the same chat as the terminal. Tools still ask, answered from whichever side is first;

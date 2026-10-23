@@ -90,7 +90,19 @@ with sync_playwright() as p:
         pg.click('#btn-settings'); pg.wait_for_timeout(500)
         sw = pg.locator('.modal .swatch').count()
         ck(sw == 19 * 4, f"settings list all 19 themes, each with its swatches ({sw // 4})")
-        pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
+        before = pg.inner_text('#log')
+        for t in ('nord', 'washi', 'gruvbox'):
+            pg.locator('.modal .opt', has_text=t).first.click(); pg.wait_for_timeout(250)
+        ck(pg.locator('.modal').count() == 1 and "\u25ce gruvbox" in pg.inner_text('.modal'),
+           "tapping themes previews them in place, settings stays open")
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(1200)
+        if os.environ.get("DEBUG"):
+            import difflib; a = pg.inner_text('#log')
+            print("META:", pg.inner_text('#meta'), len(before), len(a), list(difflib.unified_diff(before.splitlines(), a.splitlines(), lineterm=""))[:14])
+        ck(pg.inner_text('#log') == before and "theme: gruvbox" in pg.inner_text('#meta'),
+           "closing settings says the theme in the status line, nothing in the chat")
+        sess = os.popen(f"cat {HOME}/.hako/projects/*/sessions/*.jsonl 2>/dev/null").read()
+        ck("theme:" not in sess, "and nothing about the theme in the session log")
         ck(not errs, f"no JS errors through the whole session {errs[:2]}")
     b.close()
 srv.kill()

@@ -101,7 +101,15 @@ with sync_playwright() as p:
     pg.evaluate("new Promise(r => { const q = indexedDB.deleteDatabase('hako-account'); q.onsuccess = q.onerror = q.onblocked = r; })")
     pg.goto(STUDIO + "/"); pg.wait_for_timeout(1500)
     if pg.locator('.modal').count(): pg.locator('.modal button').last.click()
-    ck(pg.locator('#modes').is_hidden(), "page: signed out, nothing about accounts shows")
+    ck(pg.locator('#modes').count() == 1 and pg.locator('#modes').get_attribute('hidden') is None,
+       "page: signed out, the menu still offers chat · code (a home-screen app starts with nothing stored)")
+    pg.evaluate("document.getElementById('mode-code').click()")
+    pg.wait_for_selector('.modal button:has-text("sign in with a passkey")', timeout=10000)
+    sheet = pg.locator('.modal').inner_text()
+    ck("closed beta" in sheet and "never your chats" in sheet and "this browser" in sheet
+       and pg.locator('.modal button:has-text("request access")').count() == 1,
+       "page: signed out, code says it is a closed beta, what an account keeps, and offers to request access")
+    pg.locator('.modal button:has-text("close")').last.click()
     pg.goto(STUDIO + "/#signin"); pg.wait_for_selector('.modal button:has-text("sign in with a passkey")', timeout=10000)
     ck(pg.locator('.modal input').first.is_hidden(), "page: #signin asks for no invite")
     pg.click('.modal button:has-text("sign in with a passkey")')
@@ -191,8 +199,14 @@ with sync_playwright() as p:
     wp.fill('#input', 'SLOW from safari'); wp.click('#send'); wp.wait_for_timeout(2500)
     ck("SLOW from safari" in wp.inner_text('#log') and wp.inner_text('#send').strip() == 'stop',
        "webkit: the text shows at once and stop is offered")
+    said = seen.count(b"a device on your account connected")
     wp.reload(); wp.wait_for_timeout(4000)
     ck(wp.inner_text('#send').strip() == 'stop', "webkit: a reload mid-turn still offers stop")
+    held = subprocess.run(["lsof", "-nP", "-a", "-c", "curl", "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True).stdout
+    ck(not held.strip(), "desktop: the curls hako starts do not inherit its listening socket")
+    ck(said >= 1 and seen.count(b"a device on your account connected") == said
+       and "device on your account" not in wp.inner_text('#log'),
+       "desktop: a device that reconnects is announced once, at the desk only")
     wp.click('#send'); wp.wait_for_timeout(3000)
     ck(wp.inner_text('#send').strip() == 'send', "webkit: stop ends it")
     wp.fill('#input', 'hey from safari'); wp.click('#send')
@@ -206,7 +220,13 @@ with sync_playwright() as p:
     pg.click('#mode-chat'); pg.wait_for_timeout(2000)
     ck('#remote=' not in pg.url and pg.locator('#mode-chat.on').count() == 1, "page: chat goes back to this browser's own agent")
     pg.click('#mode-code'); pg.wait_for_timeout(3000)
-    ck('#remote=' in pg.url, "page: code goes straight back to the last project")
+    ck('#remote=' not in pg.url and pg.locator('.modal').count() == 0 and "proj" in pg.inner_text('#project-list')
+       and "add a device" in pg.inner_text('#project-list'), "page: code lists the sessions in the menu, with add a device, no popup")
+    pg.locator('#project-list button:has-text("add a device")').click()
+    ck(":remote on" in pg.locator('.modal').inner_text(), "page: add a device says to run :remote on in the folder")
+    pg.locator('.modal button:has-text("close")').click()
+    pg.locator('#project-list button:has-text("proj")').click(); pg.wait_for_timeout(3000)
+    ck('#remote=' in pg.url, "page: a session in the list opens it")
     ck(not errs, "page: no JS errors %s" % errs[:2])
     b.close()
 
