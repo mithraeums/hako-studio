@@ -2690,13 +2690,17 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
 
 /* The on-screen keyboard shrinks the window without changing any CSS viewport
-   unit, so the composer ends up underneath it, and a home-screen app on iOS
-   sizes 100dvh a status bar short. visualViewport reports the real visible box. */
+   unit, so the composer ends up underneath it. visualViewport reports the real
+   visible box. A home-screen app on iOS reports 100dvh and innerHeight a status
+   bar short while drawing under it, so there the screen is the height. */
 if (window.visualViewport) {
 	const vv = window.visualViewport;
+	const full = () => navigator.standalone
+		? (matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height))
+		: window.innerHeight;
 	const sync = () => {
 		const open = vv.height < window.innerHeight - 80;
-		document.documentElement.style.setProperty('--vh', (open ? vv.height : window.innerHeight) + 'px');
+		document.documentElement.style.setProperty('--vh', (open ? vv.height : full()) + 'px');
 		document.body.classList.toggle('kb', open);
 		if (open) log.scrollTop = log.scrollHeight;
 	};
