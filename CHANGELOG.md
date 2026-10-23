@@ -4,6 +4,22 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
+## [v0.0.4] - 2026-10-22
+
+### added
+- **code** (invite beta): sign in with a passkey (face id, a fingerprint) or an emailed code, and ☰ → code lists the code sessions running on your computers, one per shared folder, by folder and machine. open one and the page becomes that session: the same chat as the terminal, every byte sealed by `hako.wasm` before it leaves the tab. ☰ → chat goes back to this browser's own agent; code goes back to the last session. the passkey unlocks your account key on a new device; the relay never sees it. nothing about accounts shows until you are signed in
+- `relay/`: the relay itself (C, libcrypto), with `make test`; `make remote-test` runs the whole thing in a real browser
+
+### changed
+- `:login` opens the sign-in menu and `:login api` the API-key one, the same rows the terminal shows; bare `:models` and `:providers` open the pickers too. on the hosted page sign-in says it needs `hako --serve`
+- the status line follows hako's `state` event; the old "scrape the printed list" picker is gone
+- on a remote device (`hako --serve --token`, e.g. over tailscale) the folder browser starts in the project and the system picker is hidden: hako keeps a phone inside the folder it was started in
+- the model's reply appears as it is written (hako's `delta` events) and is replaced by the finished message
+
+### fixed
+- safari opened the session only after its first keepalive (up to 25 s): what you typed sat there "thinking" and stop did nothing. the relay starts every stream with a few bytes
+- a reload mid-turn keeps the turn: stop is offered, the input waits
+
 ## [v0.0.3] - 2026-10-15
 
 ### changed: the new look (2026-10-12)

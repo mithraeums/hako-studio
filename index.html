@@ -72,6 +72,10 @@
 		padding-top: env(safe-area-inset-top);
 	}
 	aside .sec { padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
+	aside .modes { display: flex; gap: 3px; padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
+	aside .modes[hidden], aside .projects[hidden] { display: none; }
+	aside .modes button { flex: 1; }
+	aside .modes button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); }
 	.label {
 		font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
 		color: var(--faint); margin-bottom: .35rem;
@@ -285,6 +289,11 @@
 <body>
 
 <aside id="side">
+	<div class="modes" id="modes" hidden><button id="mode-chat" type="button">chat</button><button id="mode-code" type="button">code</button></div>
+	<div class="projects" id="projects" hidden>
+		<div class="label" style="padding:.6rem .7rem 0">projects</div>
+		<div class="sessions" id="project-list"></div>
+	</div>
 	<div class="sec">
 		<div class="label">working directory</div>
 		<div class="dirline"><span class="path" id="dir">…</span></div>
@@ -333,7 +342,463 @@
    same file without it, so one page really is one page. */
 const HAKO_WASM_MODE = document.querySelector('meta[name="hako-mode"]')?.content === 'wasm';
 
-if (HAKO_WASM_MODE) {
+/* ---------- code: your terminal sessions, through the relay (RELAY.md) ----------
+   Signed in, the hosted page lists your open code sessions (each a folder on
+   one of your computers) and drives one. Every byte
+   between this page and the computer is sealed by hako.wasm (the same Noise C
+   the desktop runs); the relay routes ciphertext and holds no key that opens
+   it. #remote=<id> turns this page into that computer's front end: the same
+   /api calls the LAN page makes, carried in numbered streams. */
+const RELAY_URL = document.querySelector('meta[name="hako-relay"]')?.content || 'https://relay.mithraeum.studio';
+const HASH = typeof location === 'object' ? location.hash : '';
+const REMOTE_ID = (HASH.match(/^#remote=([0-9a-f]{32})$/) || [])[1] || '';
+const LINK = HASH.match(/^#link=([0-9a-f]{64})\.([0-9a-f]{64})$/);
+const INVITE = (HASH.match(/^#invite=([a-z0-9-]{10,16})$/i) || [])[1] || '';
+
+/* a test turns this on (window.hakoDebug) to see the streams; off, it costs nothing */
+const hakoTrace = (...a) => { (window.hakoLog = window.hakoLog || []).push((performance.now() / 1000).toFixed(2) + ' ' + a.join(' ')); };
+const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const unhex = (s) => new Uint8Array((s.match(/../g) || []).map((x) => parseInt(x, 16)));
+const bin = (b) => { let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return s; };
+const b64 = (b) => btoa(bin(new Uint8Array(b)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const b64u = (b) => b64(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => unb64(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+const cat = (...p) => { const o = new Uint8Array(p.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of p) { o.set(x, i); i += x.length; } return o; };
+
+/* hako.wasm's hkw_* exports in this page (the worker has its own instance).
+   Bytes go in through hkw_in and come back through hkw_out; views are made
+   fresh per call, since a call may grow memory and detach an old one. */
+const hk = {
+	ex: null,
+	async load() {
+		if (this.ex) return;
+		const v = document.querySelector('meta[name="hako-build"]')?.content;
+		const mod = await WebAssembly.compile(await (await fetch('hako.wasm' + (v ? '?v=' + v : ''))).arrayBuffer());
+		const imp = {};
+		let mem = null;
+		for (const d of WebAssembly.Module.imports(mod)) {
+			imp[d.module] = imp[d.module] || {};
+			if (d.kind !== 'function') continue;
+			imp[d.module][d.name] = d.name === 'random_get'
+				? (p, n) => { for (let o = 0; o < n; o += 65536) crypto.getRandomValues(new Uint8Array(mem.buffer, p + o, Math.min(65536, n - o))); return 0; }
+				: () => 52;                                  /* ENOSYS: the crypto needs nothing else */
+		}
+		const inst = await WebAssembly.instantiate(mod, imp);
+		mem = inst.exports.memory;
+		this.ex = inst.exports;
+	},
+	run(fn, input, ...args) {
+		if (input) new Uint8Array(this.ex.memory.buffer, this.ex.hkw_in_ptr(), input.length).set(input);
+		return this.ex[fn](...args);
+	},
+	out(n) { return new Uint8Array(this.ex.memory.buffer, this.ex.hkw_out_ptr(), n).slice(); },
+	random(n) { this.run('hkw_random', null, n); return this.out(n); },
+};
+
+/* This browser's account state, in its own IndexedDB: the device key, the
+   account key K, the account id and the passkey's credential id. */
+const kv = (mode, fn) => new Promise((resolve) => {
+	const rq = indexedDB.open('hako-account', 1);
+	rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+	rq.onerror = () => resolve(null);
+	rq.onsuccess = () => {
+		const tx = rq.result.transaction('kv', mode);
+		const r = fn(tx.objectStore('kv'));
+		tx.oncomplete = () => resolve(r && r.result);
+		tx.onerror = () => resolve(null);
+	};
+});
+const kvGet = (k) => kv('readonly', (st) => st.get(k));
+const kvSet = (k, v) => kv('readwrite', (st) => st.put(v, k));
+const kvClear = () => kv('readwrite', (st) => st.clear());
+
+const relay = {
+	token: '', id: '', acct: '', s: null,
+	async req(method, path, body) {
+		const headers = this.token ? { Authorization: 'Bearer ' + this.token } : {};
+		const r = await fetch(RELAY_URL + path, { method, headers, body: method === 'POST' ? (body || '') : undefined });
+		return { status: r.status, text: (await r.text()).trim() };
+	},
+	/* the device key proves itself: MAC keyed by X25519(s, the relay's one-off key) */
+	async signIn() {
+		await hk.load();
+		this.s = await kvGet('device');
+		if (!this.s) { this.s = hk.random(32); await kvSet('device', this.s); }
+		hk.run('hkw_pub', this.s);
+		const o = hk.out(48);
+		this.pub = o.slice(0, 32);
+		this.token = '';
+		const c = await this.req('POST', '/v1/auth/challenge', hex(this.pub));
+		if (c.status !== 200) throw new Error('can\u2019t connect right now. try again in a moment');
+		const [cid, epub] = c.text.split(' ');
+		if (hk.run('hkw_proof', cat(this.s, unhex(epub), unhex(cid)))) throw new Error('sign-in didn\u2019t work, try again');
+		const p = await this.req('POST', '/v1/auth/prove', cid + ' ' + hex(hk.out(32)));
+		if (p.status !== 200) throw new Error('sign-in didn\u2019t work, try again');
+		const [tok, id, acct] = p.text.split(' ');
+		this.token = tok; this.id = id; this.acct = acct === '-' ? '' : acct;
+	},
+	async send(to, frame) {
+		const r = await this.req('POST', '/v1/up', to + ' ' + b64(frame) + '\n');
+		return r.status === 200;
+	},
+};
+
+/* ---- signing in: a passkey (its prf unlocks K) or an emailed code ---- */
+const PRF_SALT = new TextEncoder().encode('hako account key v1');
+
+async function waChallenge() {
+	const r = await relay.req('POST', '/v1/webauthn/challenge');
+	if (r.status !== 200) throw new Error('can\u2019t connect right now. try again in a moment');
+	return unb64u(r.text);
+}
+
+const prfOf = (cred) => {
+	const f = cred.getClientExtensionResults().prf?.results?.first;
+	return f ? new Uint8Array(f) : null;
+};
+
+/* K under this passkey's prf, stored on the relay for the next device. */
+async function storeWrapped(credId, prf, K) {
+	hk.run('hkw_wrap', cat(prf, K));
+	await relay.req('POST', '/v1/passkey/key', credId + ' ' + b64u(hk.out(72)));
+}
+
+async function passkeyLogin() {
+	const cred = await navigator.credentials.get({ publicKey: {
+		challenge: await waChallenge(), rpId: location.hostname, userVerification: 'required',
+		extensions: { prf: { eval: { first: PRF_SALT } } } } });
+	const r = cred.response, credId = b64u(cred.rawId);
+	const res = await relay.req('POST', '/v1/passkey/login',
+		[credId, b64u(r.clientDataJSON), b64u(r.authenticatorData), b64u(r.signature)].join(' '));
+	if (res.status !== 200) throw new Error(res.status === 409 ? 'this browser is signed in to another account' : 'that passkey was not accepted');
+	const [acct, wrapped] = res.text.split(' ');
+	const prf = prfOf(cred);
+	let K = (await kvGet('acct')) === acct ? await kvGet('k') : null;
+	if (wrapped !== '-' && prf) {
+		if (hk.run('hkw_unwrap', cat(prf, unb64u(wrapped)))) throw new Error('the passkey did not open your account key');
+		K = hk.out(32);
+	} else if (prf && K) await storeWrapped(credId, prf, K);
+	relay.acct = acct;
+	await kvSet('acct', acct); await kvSet('cred', credId);
+	if (K) await kvSet('k', K);
+	return { acct, K, prf: !!prf };
+}
+
+async function passkeyCreate(invite) {
+	const cred = await navigator.credentials.create({ publicKey: {
+		rp: { name: 'hako', id: location.hostname },
+		user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'hako', displayName: 'hako' },
+		challenge: await waChallenge(),
+		pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+		authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+		extensions: { prf: { eval: { first: PRF_SALT } } } } });
+	const r = cred.response, spki = r.getPublicKey && r.getPublicKey();
+	if (!spki) throw new Error('this browser can\u2019t make a passkey hako can use');
+	const credId = b64u(cred.rawId);
+	const res = await relay.req('POST', '/v1/passkey/register',
+		[relay.acct ? '-' : (invite || '-'), credId, b64u(r.clientDataJSON), b64u(r.getAuthenticatorData()), b64u(spki)].join(' '));
+	if (res.status !== 200) throw new Error(res.status === 403 ? (relay.acct ? 'that passkey didn\u2019t work' : 'that invite didn\u2019t work') : 'that passkey didn\u2019t work (' + res.status + ')');
+	const fresh = !relay.acct;
+	relay.acct = res.text;
+	await kvSet('acct', relay.acct); await kvSet('cred', credId);
+	let K = await kvGet('k');
+	if (fresh || !K) { K = hk.random(32); await kvSet('k', K); }
+	let prf = prfOf(cred);
+	if (!prf) {                                     /* some browsers answer prf only on a sign-in */
+		const again = await navigator.credentials.get({ publicKey: {
+			challenge: await waChallenge(), rpId: location.hostname, userVerification: 'required',
+			allowCredentials: [{ type: 'public-key', id: cred.rawId }], extensions: { prf: { eval: { first: PRF_SALT } } } } });
+		prf = prfOf(again);
+	}
+	if (prf) await storeWrapped(credId, prf, K);
+	return { acct: relay.acct, K, prf: !!prf };
+}
+
+async function emailStart(addr) {
+	const r = await relay.req('POST', '/v1/email/start', addr.trim());
+	if (r.status !== 200) throw new Error(r.status === 400 ? 'that address does not look right' : r.text || 'could not send a code');
+}
+
+async function emailVerify(code, invite) {
+	const r = await relay.req('POST', '/v1/email/verify', code.trim() + ' ' + (invite.trim() || '-'));
+	if (r.status === 402) throw new Error('a new account needs an invite code');
+	if (r.status !== 200) throw new Error(r.status === 403 ? 'wrong or expired code' : 'sign-in failed (' + r.status + ')');
+	const [acct, made] = r.text.split(' ');
+	if (made === 'new' || (await kvGet('acct')) !== acct) await kvSet('k', made === 'new' ? hk.random(32) : null);
+	relay.acct = acct;
+	await kvSet('acct', acct);
+	return { acct, K: await kvGet('k') };
+}
+
+/* The link page (#link=<computer pub>.<secret>): bind that computer to this
+   account, then send it K sealed under the secret from this URL's fragment,
+   which no server ever saw. */
+async function linkComputer(pubHex, secretHex) {
+	const K = await kvGet('k');
+	if (!K) throw new Error('this browser does not hold your account key yet: sign in with your passkey');
+	const b = await relay.req('POST', '/v1/bind', pubHex);
+	if (b.status !== 200) throw new Error(b.status === 409 ? 'that computer is linked to another account' : 'could not link (' + b.status + ')');
+	hk.run('hkw_id', unhex(pubHex));
+	const id = hex(hk.out(16));
+	hk.run('hkw_link', cat(unhex(secretHex), K, new TextEncoder().encode(relay.acct)));
+	if (!(await relay.send(id, cat(new Uint8Array([3]), hk.out(88))))) throw new Error('couldn\u2019t reach that computer, try again');
+	history.replaceState(null, '', location.pathname);    /* the secret leaves the address bar */
+}
+
+/* The account's open code sessions: each seals "code:<host>\t<folder>" under
+   K, so only a device holding K can tell a session from a browser, or read it. */
+async function codeSessions() {
+	const r = await relay.req('GET', '/v1/devices');
+	const K = await kvGet('k');
+	if (r.status !== 200 || !K) return [];
+	const out = [];
+	for (const l of r.text.split('\n').filter(Boolean)) {
+		const [id, , online, sealed] = l.split(' ');
+		if (!sealed || sealed === '-') continue;
+		const blob = unb64u(sealed), n = hk.run('hkw_name_open', cat(K, blob), 32 + blob.length);
+		const name = n > 0 ? new TextDecoder().decode(hk.out(n)) : '';
+		if (online !== '1' || !name.startsWith('code:')) continue;
+		const [host, dir] = name.slice(5).split('\t');
+		out.push({ id, host: host || 'computer', dir: dir || '', name: (dir || '').split('/').filter(Boolean).pop() || host });
+	}
+	return out;
+}
+
+/* ---- the remote carrier: this page's /api, sealed, to one computer ---- */
+let remote = null;
+if (REMOTE_ID) {
+	const enc = new TextEncoder(), dec = new TextDecoder();
+	const streams = new Map();
+	let nextSid = 1, ready = null, outq = [], sending = false;
+
+	const flush = async () => {
+		if (sending) return;
+		sending = true;
+		while (outq.length) {
+			const batch = outq.splice(0, 32).map((f) => REMOTE_ID + ' ' + b64(f) + '\n').join('');
+			try { await relay.req('POST', '/v1/up', batch); } catch (e) { break; }
+		}
+		sending = false;
+	};
+	const frame = (kind, body) => { outq.push(cat(new Uint8Array([kind]), body)); flush(); };
+	/* sealed in send order, so the computer's nonce count stays in step */
+	const sendOp = (sid, op, data) => {
+		const p = cat(new Uint8Array([sid >>> 24, (sid >>> 16) & 255, (sid >>> 8) & 255, sid & 255, op]), data || new Uint8Array(0));
+		const n = hk.run('hkw_seal', p, p.length);
+		if (n > 0) frame(2, hk.out(n));
+	};
+
+	let hsWait = null;
+	const onFrame = (f) => {
+		if (f[0] === 1 && hsWait) { const w = hsWait; hsWait = null; w(f.subarray(1)); return; }
+		if (f[0] !== 2) return;
+		const n = hk.run('hkw_open', f.subarray(1), f.length - 1);
+		if (n < 5) return;
+		const p = hk.out(n);
+		const sid = ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0, st = streams.get(sid);
+		if (window.hakoDebug) hakoTrace('[remote] frame sid', sid, 'op', p[4], 'len', n - 5, st ? '' : '(no stream)');
+		if (!st) return;
+		if (p[4] === 1) st.data(p.subarray(5)); else { streams.delete(sid); st.end(); }
+	};
+
+	const down = async () => {
+		const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token } });
+		if (!r.ok) throw new Error('can\u2019t connect right now');
+		const rd = r.body.getReader();
+		let buf = '';
+		(async () => {
+			for (;;) {
+				let value, done;
+				try { ({ value, done } = await rd.read()); } catch (e) { break; }   /* a reload or a dropped network */
+				if (done) break;
+				if (window.hakoDebug) hakoTrace('[remote] down', value.length);
+				buf += dec.decode(value, { stream: true });
+				let i;
+				while ((i = buf.indexOf('\n')) >= 0) {
+					const line = buf.slice(0, i); buf = buf.slice(i + 1);
+					if (line.startsWith(REMOTE_ID + ' ')) onFrame(unb64(line.slice(33)));
+					else if (line === '! offline ' + REMOTE_ID && hsWait) { const w = hsWait; hsWait = null; w(null); }
+				}
+			}
+			for (const st of streams.values()) st.end(true);
+			streams.clear();
+			window.dispatchEvent(new Event('hako-remote-lost'));
+		})();
+	};
+
+	const connect = async () => {
+		if (window.hakoDebug) hakoTrace('[remote] connect');
+		await relay.signIn();
+		const K = await kvGet('k');
+		if (!relay.acct || !K) throw new Error('sign in on this device first');
+		await down();
+		await new Promise((r) => setTimeout(r, 150));
+		hk.run('hkw_session', cat(relay.s, K));
+		const msg2 = new Promise((r) => { hsWait = r; setTimeout(() => { if (hsWait === r) { hsWait = null; r(null); } }, 8000); });
+		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
+		const m2 = await msg2;
+		if (!m2) throw new Error('that computer is not answering. is :remote on?');
+		if (hk.run('hkw_hs_read', m2, m2.length) < 0) throw new Error('that computer has a different account key');
+		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
+		if (!hk.ex.hkw_ready()) throw new Error('the session did not finish');
+	};
+	ready = connect();
+
+	/* one HTTP exchange over a new stream; the reply ends when the computer closes it */
+	const open = async (head, body, onData, onEnd) => {
+		await ready;
+		const sid = nextSid++;
+		streams.set(sid, { data: onData, end: onEnd });
+		if (window.hakoDebug) hakoTrace('[remote] open', sid, head.split('\r\n')[0]);
+		const req = cat(enc.encode(head), body || new Uint8Array(0));
+		for (let o = 0; o < req.length || o === 0; o += 48000) { sendOp(sid, 1, req.subarray(o, o + 48000)); if (!req.length) break; }
+		return sid;
+	};
+	const reqHead = (method, url, n) => method + ' ' + url + ' HTTP/1.1\r\nHost: relay\r\nContent-Type: text/plain\r\nContent-Length: ' + n + '\r\n\r\n';
+
+	const origFetch = window.fetch.bind(window);
+	window.fetch = async (input, init) => {
+		const url = typeof input === 'string' ? input : input.url;
+		if (window.hakoDebug) hakoTrace('[remote] fetch', url);
+		if (!url.startsWith('/api/')) return origFetch(input, init);
+		const method = (init && init.method) || 'GET';
+		let body = init && init.body != null ? init.body : null;
+		body = body == null ? null : typeof body === 'string' ? enc.encode(body) : new Uint8Array(await new Response(body).arrayBuffer());
+		const parts = [];
+		await new Promise((resolve, reject) => {
+			open(reqHead(method, url, body ? body.length : 0), body, (d) => parts.push(d.slice()), (lost) => (lost ? reject(new Error('connection lost')) : resolve()))
+				.catch(reject);
+		});
+		const all = cat(...parts), text = bin(all.subarray(0, Math.min(all.length, 4096)));
+		const he = text.indexOf('\r\n\r\n');
+		const status = parseInt(text.slice(9, 12), 10) || 502;
+		const headers = new Headers();
+		for (const l of text.slice(0, he).split('\r\n').slice(1)) { const c = l.indexOf(':'); if (c > 0) headers.append(l.slice(0, c), l.slice(c + 1).trim()); }
+		return new Response(status === 204 ? null : all.subarray(he + 4), { status, headers });
+	};
+
+	/* /api/events, parsed as it streams */
+	window.EventSource = class {
+		constructor(url) {
+			this.onopen = null; this.onmessage = null; this.onerror = null;
+			let buf = '', head = true;
+			const td = new TextDecoder();
+			open(reqHead('GET', url, 0), null, (d) => {
+				buf += td.decode(d, { stream: true });
+				if (head) { const i = buf.indexOf('\r\n\r\n'); if (i < 0) return; buf = buf.slice(i + 4); head = false; if (this.onopen) this.onopen(); }
+				let i;
+				while ((i = buf.indexOf('\n\n')) >= 0) {
+					const ev = buf.slice(0, i); buf = buf.slice(i + 2);
+					const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+					if (data && this.onmessage) this.onmessage({ data });
+				}
+			}, () => { if (this.onerror) this.onerror(new Event('error')); }).catch(() => { if (this.onerror) this.onerror(new Event('error')); });
+		}
+		close() {}
+	};
+	remote = { ready };
+}
+
+/* ---- the account sheet ---- */
+window.hakoAccount = {
+	enabled: HAKO_WASM_MODE,
+	async open(linkTo) {
+		const m = modal(linkTo ? 'link this computer' : 'code');
+		const say = (t, err) => { const n = document.createElement('div'); n.className = 'note'; if (err) n.style.color = 'var(--err)'; n.textContent = t; m.body.appendChild(n); return n; };
+		const btn = (label, fn, where) => { const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', fn); (where || m.foot).appendChild(b); return b; };
+		const field = (ph, type) => { const i = document.createElement('input'); i.placeholder = ph; i.type = type || 'text'; i.autocapitalize = 'off'; i.spellcheck = false; m.body.appendChild(i); return i; };
+		const fail = (e) => say(e.message || String(e), true);
+		try { await relay.signIn(); } catch (e) { fail(e); return; }
+		const signedIn = async () => {
+			m.body.textContent = ''; m.foot.textContent = '';
+			$('modes').hidden = false;
+			if (linkTo) {
+				try { await linkComputer(linkTo[1], linkTo[2]); say('linked. its sessions now show under code on every device signed in to your account. you can close this tab.'); }
+				catch (e) { fail(e); }
+				btn('done', m.close);
+				return;
+			}
+			if (!(await kvGet('k'))) say('signed in, but this browser does not hold your account key yet. sign in here with your passkey to unlock it.', true);
+			const list = await codeSessions();
+			if (!list.length) say('no open code sessions. in a terminal, run :remote on in hako to share that session here.');
+			for (const c of list) m.body.appendChild(optionRow(c.name, c.host + (c.dir ? ' \u00b7 ' + c.dir : ''), '', () => {
+				location.hash = '#remote=' + c.id; location.reload();
+			}, c.id === REMOTE_ID));
+			const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
+			btn('sign out here', async () => { await kvClear(); m.close(); });
+			btn('close', m.close);
+		};
+		if (relay.acct && (await kvGet('k'))) return signedIn();
+		say(relay.acct ? 'unlock your account on this browser:' : 'sign in to reach your code sessions from here: face id or a fingerprint, or a code by email.');
+		const inv = field('invite code');
+		inv.value = INVITE;
+		inv.hidden = !INVITE && !linkTo;
+		btn('sign in with a passkey', async () => {
+			try {
+				let r = null;
+				try { r = await passkeyLogin(); } catch (e) { if (!inv.value.trim() || e.name !== 'NotAllowedError') throw e; }
+				if (!r) r = await passkeyCreate(inv.value.trim());
+				signedIn();
+			} catch (e) { fail(e); }
+		}, m.body);
+		if (!inv.hidden) btn(INVITE ? 'create your account' : 'new account (invite)', async () => { try { await passkeyCreate(inv.value.trim()); signedIn(); } catch (e) { fail(e); } }, m.body);
+		const mail = field('or email', 'email');
+		const code = field('six-digit code');
+		code.hidden = true;
+		const send = btn('email me a code', async () => {
+			try {
+				if (code.hidden) { await emailStart(mail.value); code.hidden = false; send.textContent = 'sign in'; say('sent. it works for ten minutes.'); return; }
+				await emailVerify(code.value, inv.value);
+				signedIn();
+			} catch (e) { fail(e); }
+		}, m.body);
+		btn('close', m.close);
+	},
+	/* Nobody sees any of this until they are signed in, invited (#invite=),
+	   sent here by their computer (#link=, #signin) or in a session (#remote=). */
+	async boot() {
+		if (!HAKO_WASM_MODE) return;
+		/* chat is this browser's own agent; code is a session on one of your computers */
+		$('mode-chat').classList.toggle('on', !REMOTE_ID);
+		$('mode-code').classList.toggle('on', !!REMOTE_ID);
+		const go = (id) => { location.hash = '#remote=' + id; location.reload(); };
+		$('mode-chat').addEventListener('click', () => { closeNav(); if (REMOTE_ID) { location.hash = ''; location.reload(); } });
+		/* code: straight back to the last project if it is still open, else the list */
+		$('mode-code').addEventListener('click', async () => {
+			if (REMOTE_ID) return;
+			closeNav();
+			const last = await kvGet('lastCode');
+			try { await relay.signIn(); } catch (e) { return this.open(); }
+			const list = await codeSessions();
+			if (last && list.some((c) => c.id === last)) go(last); else this.open();
+		});
+		/* in code, the menu lists the projects (each a shared folder) to move between */
+		const projects = async () => {
+			const list = await codeSessions(), el = $('project-list');
+			el.textContent = '';
+			for (const c of list) el.appendChild(optionRow(c.name, c.host, '', () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }, c.id === REMOTE_ID));
+			$('projects').hidden = !list.length;
+		};
+		$('modes').hidden = !(REMOTE_ID || ((await kvGet('acct')) && (await kvGet('k'))));
+		/* a code session lives in its folder: no browsing to another one from here */
+		if (REMOTE_ID) $('btn-dir').hidden = true;
+		if (HASH === '#signin' || INVITE) { history.replaceState(null, '', location.pathname); this.open(); }
+		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|remote=)/.test(location.hash)) location.reload(); });
+		window.addEventListener('hako-remote-lost', () => {
+			const m = modal('the connection dropped');
+			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => location.reload()); m.foot.appendChild(b);
+		});
+		if (LINK) this.open(LINK);
+		if (REMOTE_ID) {
+			remote.ready.then(() => { kvSet('lastCode', REMOTE_ID); projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
+				.catch((e) => { const m = modal('could not reach that computer'); const n = document.createElement('div'); n.className = 'note'; n.textContent = e.message; m.body.appendChild(n);
+					const b = document.createElement('button'); b.textContent = 'back to this browser'; b.addEventListener('click', () => { location.hash = ''; location.reload(); }); m.foot.appendChild(b); });
+		}
+	},
+};
+
+if (HAKO_WASM_MODE && !REMOTE_ID) {
 	const worker = new Worker('hako-worker.js', { type: 'module' });
 	const ring = [];                       /* events, so a late listener sees them */
 	let listeners = [];
@@ -568,6 +1033,8 @@ if (HAKO_WASM_MODE) {
 				   headers at all. The key-paste variants have no such problem. */
 				const OAUTH_BLOCKED = {
 					anthropic: 'anthropic-api',
+					chatgpt: 'openai',
+					codex: 'openai',
 					openrouter: 'openrouter-api',
 					copilot: null,
 					'github-models': null,
@@ -810,7 +1277,7 @@ const askBoxes = new Map();
    can outrun the binary serving it). So ask what this core supports and degrade,
    never assume a version. */
 let caps = new Set();
-const isWasm = !!document.querySelector('meta[name="hako-mode"][content="wasm"]');
+const isWasm = !!document.querySelector('meta[name="hako-mode"][content="wasm"]') && !REMOTE_ID;
 /* Shown in the header so "is this the new build?" has an answer. */
 const buildId = (document.querySelector('meta[name="hako-build"]') || {}).content || '';
 async function handshake() {
@@ -826,6 +1293,7 @@ async function handshake() {
 		renderMeta();
 		/* A reload mid-prompt: the core still wants an answer, so ask again. */
 		if (j.awaiting_input) askInput({ prompt: j.input_prompt, hidden: j.input_hidden });
+		if (j.busy) setBusy(true);                      /* a reload mid-turn: still running there */
 		else { pendingInput = null; renderPending(); }
 	} catch (e) { caps = new Set(); }
 }
@@ -835,7 +1303,11 @@ async function refreshState() {
 }
 const closeNav = () => document.body.classList.remove('nav');
 
-function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); }
+function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); live = null; }
+/* The reply as it streams. The finished message replaces it; a tool call or the
+   turn's end drops what is left (a withdrawn tool block, never the answer). */
+let live = null;
+function dropLive() { if (live) { live.remove(); live = null; } }
 function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
 function add(cls, who, text) {
 	const stick = atBottom();
@@ -1108,44 +1580,12 @@ function settle(box, ans) {
 	box.appendChild(v);
 }
 
-/* ---------- catalog capture (cloud model / provider lists) ----------
-   The singular :model/:provider/:theme commands open a blocking terminal picker
-   that reads stdin; over the bridge that swallows the user's next message. So
-   the UI asks with the safe plural form and sends only explicit arguments. */
-let capture = null;
-function listThenPick(cmd, kind, title, apply) {
-	capture = { kind, items: [], title, apply };
-	post('/api/slash', cmd);
-	setTimeout(() => { if (capture && capture.kind === kind) finishCapture(); }, 4000);
-}
-function finishCapture() {
-	if (!capture) return;
-	const c = capture; capture = null;
-	const m = modal(c.title);
-	c.items.forEach((it) => m.body.appendChild(optionRow(it.label, '', '', () => { m.close(); c.apply(it.value); }, it.current)));
-	if (!c.items.length) m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no options returned — type one below' }));
-	const inp = document.createElement('input');
-	inp.placeholder = 'or type an id and press enter';
-	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value.trim()) { m.close(); c.apply(inp.value.trim()); } });
-	const g = document.createElement('div'); g.className = 'grow'; g.appendChild(inp);
-	m.foot.append(g, mb('cancel', '', m.close));
-	inp.focus();
-}
-function captureLine(text) {
-	if (!capture) return false;
-	if (/^\s*$/.test(text)) return true;
-	if (/to select|to see all|models for|^providers?:|^available/i.test(text)) return true;
-	const m = text.match(/^\s*([◎●*>]\s*)?(\S+)\s*$/);
-	if (m) capture.items.push({ label: m[2], value: m[2], current: !!m[1] });
-	return true;
-}
-
 /* ---------- provider picker ----------
    Reads /api/providers. The old version scraped the printed `:providers` table,
    whose rows are columns of prose — the scrape matched nothing, so the picker
    always came up empty while typing a name by hand worked fine. */
-async function openProviderPicker(onPicked) {
-	const m = modal('provider');
+async function openProviderPicker(onPicked, only) {
+	const m = modal(only === 'oauth' ? 'sign in' : only === 'key' ? 'API key' : 'provider');
 	m.body.appendChild(Object.assign(document.createElement('div'),
 		{ className: 'note', textContent: 'loading…' }));
 	let j = { providers: [] };
@@ -1157,9 +1597,11 @@ async function openProviderPicker(onPicked) {
 	                ['sign in', (p) => !p.saved && p.kind === 'oauth'],
 	                ['api key', (p) => !p.saved && p.kind === 'key']];
 
+	let shown = 0;
 	groups.forEach(([label, filter]) => {
-		const rows = (j.providers || []).filter(filter);
+		const rows = (j.providers || []).filter((p) => (!only || p.kind === only) && filter(p));
 		if (!rows.length) return;
+		shown += rows.length;
 		m.body.appendChild(groupLabel(label));
 		rows.forEach((p) => m.body.appendChild(optionRow(
 			p.name, p.desc, p.saved ? 'ready' : (p.kind === 'oauth' ? 'login' : ''),
@@ -1177,6 +1619,9 @@ async function openProviderPicker(onPicked) {
 			}, p.active)));
 	});
 
+	if (!shown) m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+		textContent: only === 'oauth' ? 'signing in needs hako running on a computer (hako --serve). here, :login api takes a key.'
+		                              : 'no providers returned' }));
 	const g = document.createElement('div'); g.className = 'grow';
 	m.foot.append(g, mb('cancel', '', m.close));
 }
@@ -1373,7 +1818,7 @@ async function saveOut(path, name) {
    a person needs to know about this build, not something to discover when it
    disappears. */
 function browserNotice() {
-	if (!isWasm || settings.browser_notice) return;
+	if (!isWasm || settings.browser_notice || LINK) return;
 	const m = modal('this runs in your browser');
 	const n = document.createElement('div');
 	n.className = 'note';
@@ -1654,6 +2099,8 @@ async function openBrowser() {
 					{ className: 'note', textContent: 'could not open that folder' }));
 			});
 		}
+	} else if (!caps.has('find')) {
+		/* a remote device: hako keeps it inside the project, so no picker */
 	} else if (window.showDirectoryPicker) {
 		sysBtn = mb('system picker…', '', async () => {
 			let handle;
@@ -2050,11 +2497,18 @@ es.onmessage = (ev) => {
 			state.provider = m.provider || ''; state.model = m.model || ''; state.turns = m.turns || 0;
 			renderMeta(); loadSessions();
 			break;
+		case 'delta': {
+			const stick = atBottom();
+			if (!live) live = add('turn model live', 'hako', '');
+			live.appendChild(document.createTextNode(m.text || ''));
+			if (stick) log.scrollTop = log.scrollHeight;
+			break;
+		}
 		case 'message':
+			dropLive();
 			if (m.role === 'user') { add('turn user', 'you', m.text || ''); setBusy(true); break; }
 			if (m.role === 'system') {
 				sniffState(m.text || '');                       /* always watch for state lines */
-				if (captureLine(m.text || '')) break;           /* harvested into an open picker */
 				add('turn system', '', m.text || '');
 			} else {
 				add('turn model', 'hako', m.text || '');
@@ -2067,6 +2521,10 @@ es.onmessage = (ev) => {
 			break;
 		case 'tool_request': askApproval(m); break;
 		case 'choice_request': askChoice(m); break;
+		case 'state':                       /* a menu pick: the status line, never the chat */
+			state.provider = m.provider || ''; state.model = m.model || '';
+			renderMeta();
+			break;
 		case 'choice_decision': {
 			const box = askBoxes.get('c' + m.id);
 			if (box && !box.classList.contains('settled')) settle(box, 'answered');
@@ -2077,7 +2535,7 @@ es.onmessage = (ev) => {
 			if (box && !box.classList.contains('settled')) settle(box, m.answer);
 			break;
 		}
-		case 'tool_start': add('tool', '', arrowed('→', m.display || 'tool')); break;
+		case 'tool_start': dropLive(); add('tool', '', arrowed('→', m.display || 'tool')); break;
 		case 'tool_end':   add(/^error:/.test(m.display || '') ? 'tool fail' : 'tool', '', arrowed('←', m.display || 'done')); break;
 		case 'tool_result': {
 			/* What the tool actually returned. A byte count is not an answer to
@@ -2087,19 +2545,19 @@ es.onmessage = (ev) => {
 			break;
 		}
 		case 'done':
+			dropLive();
 			state.turns = m.turn || state.turns;
 			renderMeta(); setBusy(false);
 			settleOpenChoices();
-			if (capture) finishCapture();
 			loadSessions();
 			loadFiles();
 			break;
-		case 'error': add('turn error', '', m.text || 'error'); setBusy(false); break;
+		case 'error': dropLive(); add('turn error', '', m.text || 'error'); setBusy(false); break;
 	}
 };
 
 /* ---------- input ---------- */
-const UNSAFE = /^[:/](model|provider|theme)\s*$/i;
+const UNSAFE = /^[:/](models?|providers?|theme|login(\s+api)?)\s*$/i;
 const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
 
 form.addEventListener('submit', (e) => {
@@ -2110,13 +2568,12 @@ form.addEventListener('submit', (e) => {
 	input.value = ''; input.style.height = 'auto';
 
 	if (UNSAFE.test(text)) {
-		const which = text.replace(/^[:/]/, '').trim().toLowerCase();
+		const which = text.replace(/^[:/]/, '').trim().toLowerCase().replace(/\s+/g, ' ');
 		if (which === 'theme') openSettings();
-		else if (which === 'model') openModelPicker();
-		else listThenPick(':providers', 'provider', 'provider', (v) => {
-			post('/api/slash', ':provider ' + v);
-			state.provider = v; state.model = ''; renderMeta();
-		});
+		else if (which.startsWith('model')) openModelPicker();
+		else if (which === 'login') openProviderPicker(null, 'oauth');
+		else if (which === 'login api') openProviderPicker(null, 'key');
+		else openProviderPicker();
 		return;
 	}
 	setBusy(true);
@@ -2197,6 +2654,7 @@ if (window.visualViewport) {
 input.addEventListener('focus', () => setTimeout(() => { log.scrollTop = log.scrollHeight; }, 250));
 
 handshake().then(() => { loadSessions(); browserNotice(); });
+window.hakoAccount.boot();
 </script>
 </body>
 </html>
