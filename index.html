@@ -92,6 +92,13 @@
 	.sess:hover { background: var(--panel-2); border-color: var(--line); }
 	.sess.cur { border-color: var(--gold-dim); color: var(--gold); }
 	.sess .when { display: block; color: var(--faint); font-size: 10px; }
+	/* hosted, a row says what it is: a code session (an agent on a computer) or a chat in this browser */
+	.sess.k-code::before, .sess.k-chat::before { display: inline-block; width: 1.3em; }
+	.sess.k-code::before { content: '\25A3'; color: var(--gold); }
+	.sess.k-chat::before { content: '\25CB'; color: var(--faint); }
+	.sess.k-code .when, .sess.k-chat .when { padding-left: 1.3em; }
+	.here { display: contents; }
+	.here[hidden] { display: none; }
 	.sessrow { display: flex; align-items: stretch; gap: .2rem; }
 	.sessrow .sess { flex: 1; min-width: 0; }
 	/* Always visible, dim until hovered — discoverable without hunting for them. */
@@ -290,9 +297,10 @@
 <aside id="side">
 	<div class="modes" id="modes" hidden><button id="mode-chat" type="button">chat</button><button id="mode-code" type="button">code</button></div>
 	<div class="projects" id="projects" hidden>
-		<div class="label" style="padding:.6rem .7rem 0">projects</div>
+		<div class="label" style="padding:.6rem .7rem 0">code</div>
 		<div class="sessions" id="project-list"></div>
 	</div>
+	<div class="here" id="here">
 	<div class="sec">
 		<div class="label">working directory</div>
 		<div class="dirline"><span class="path" id="dir">…</span></div>
@@ -308,6 +316,7 @@
 	<div class="sidefoot">
 		<button id="btn-new">new session</button>
 		<button id="btn-restart" title="Reload this folder — fresh session state, same agent">reload</button>
+	</div>
 	</div>
 </aside>
 
@@ -784,19 +793,35 @@ window.hakoAccount = {
 		$('mode-code').classList.toggle('on', !!REMOTE_ID);
 		const go = (id) => { location.hash = '#remote=' + id; location.reload(); };
 		const pick = (code) => { $('mode-chat').classList.toggle('on', !code); $('mode-code').classList.toggle('on', code); };
-		/* chat and code both keep the menu open and swap what it lists */
-		$('mode-chat').addEventListener('click', () => {
-			if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
-			$('projects').hidden = true; pick(false);
-		});
-		/* code lists the open code sessions (each a shared folder) right in the menu */
+		/* the open code sessions (each a shared folder), right in the menu */
+		const row = (label, sub, cls, fn) => {
+			const b = document.createElement('button');
+			b.className = 'sess' + cls;
+			b.textContent = label;
+			if (sub) b.appendChild(Object.assign(document.createElement('span'), { className: 'when', textContent: sub }));
+			b.addEventListener('click', fn);
+			return b;
+		};
 		const projects = async () => {
 			const list = await codeSessions(), el = $('project-list');
 			el.textContent = '';
-			for (const c of list) el.appendChild(optionRow(c.name, c.host, '', () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }, c.id === REMOTE_ID));
-			el.appendChild(optionRow('+ add a device', '', '', () => { closeNav(); addDevice(); }));
+			for (const c of list) el.appendChild(row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }));
+			el.appendChild(row('+ add a device', '', '', () => { closeNav(); addDevice(); }));
 			$('projects').hidden = false;
 		};
+		/* signed in, chat shows both, code sessions above this browser's chats; code shows
+		   code only (inside a session, that folder's chats are code too) */
+		const show = async (code) => {
+			pick(code);
+			$('here').hidden = code && !REMOTE_ID;
+			if (code) return projects();
+			if (!(await kvGet('k'))) { $('projects').hidden = true; return; }
+			try { await relay.signIn(); await projects(); } catch (e) { $('projects').hidden = true; }
+		};
+		$('mode-chat').addEventListener('click', () => {
+			if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
+			show(false);
+		});
 		const addDevice = () => {
 			const m = modal('add a device');
 			for (const t of ['on your computer, in the folder you want to reach: run hako, then :remote on.',
@@ -808,8 +833,7 @@ window.hakoAccount = {
 		$('mode-code').addEventListener('click', async () => {
 			try { await relay.signIn(); } catch (e) { closeNav(); return this.open(); }
 			if (!relay.acct || !(await kvGet('k'))) { closeNav(); return this.open(); }
-			pick(true);
-			await projects();
+			await show(true);
 		});
 		$('modes').hidden = false;
 		/* a code session lives in its folder: no browsing to another one from here */
@@ -821,6 +845,7 @@ window.hakoAccount = {
 			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => location.reload()); m.foot.appendChild(b);
 		});
 		if (LINK) this.open(LINK);
+		if (!REMOTE_ID) show(false);
 		if (REMOTE_ID) {
 			remote.ready.then(() => { projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
 				.catch((e) => { const m = modal('could not reach that computer'); const n = document.createElement('div'); n.className = 'note'; n.textContent = e.message; m.body.appendChild(n);
@@ -1202,6 +1227,7 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 		mistral: 'https://console.mistral.ai/api-keys',
 		cerebras: 'https://cloud.cerebras.ai',
 		openrouter: 'https://openrouter.ai/keys',
+		nous: 'https://portal.nousresearch.com',
 		xai: 'https://console.x.ai',
 		together: 'https://api.together.ai/settings/api-keys',
 		fireworks: 'https://fireworks.ai/api-keys',
@@ -1212,12 +1238,18 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 	const endTurn = () => emit({ type: 'done', turn: 0, in: 0, out: 0, session: '' });
 
 	const needKey = (provider) => {
+		if (!provider || provider === 'none') {
+			emit({ type: 'message', role: 'system',
+			       text: 'This runs entirely in your browser, so it needs a provider and your own API key. '
+			           + 'Pick a provider first: :provider, or settings.' });
+			endTurn();
+			return;
+		}
 		pendingKey = provider;
 		const url = KEY_URL[provider];
 		emit({ type: 'message', role: 'system',
 		       text: 'This runs entirely in your browser, so it needs your own API key. '
-		           + 'It is stored on this device and sent only to ' + (provider && provider !== 'none' ? provider : 'the provider you pick') + '.' });
-		if (!provider || provider === 'none') emit({ type: 'message', role: 'system', text: 'Pick a provider first: :provider, or settings.' });
+		           + 'It is stored on this device and sent only to ' + provider + '.' });
 		if (url) emit({ type: 'message', role: 'system', text: 'Get one here: ' + url });
 		emit({ type: 'input_request', prompt: 'paste your ' + provider + ' API key', hidden: 1 });
 		endTurn();
@@ -2449,7 +2481,7 @@ async function loadSessions() {
 			row.className = 'sessrow';
 
 			const b = document.createElement('button');
-			b.className = 'sess' + (s.id === state.session ? ' cur' : '');
+			b.className = 'sess' + (s.id === state.session ? ' cur' : '') + (HAKO_WASM_MODE ? (REMOTE_ID ? ' k-code' : ' k-chat') : '');
 			b.title = s.id;
 			b.textContent = s.title || '(empty)';
 			const w = document.createElement('span');
