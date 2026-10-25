@@ -4,6 +4,17 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
+## [v0.0.7] - 2026-10-25
+
+### changed
+- signed in, chat lists your code sessions above this browser's chats; code lists code sessions only (inside a session, that folder's chats too)
+- each row says what it is: ▣ a code session, ○ a chat in this browser
+
+### fixed
+- with no provider picked, a prompt in the browser asked to "paste your none API key". it says to pick a provider first now
+- Nous Portal is in the key list, with a link to get one
+- `tools/remote-test.py` checks that a dead upload reconnects, and only looks at its own hako's curls for an inherited socket
+
 ## [v0.0.6] - 2026-10-23
 
 ### fixed

@@ -123,6 +123,7 @@ with sync_playwright() as p:
     ck(until(rb"a device on your account connected") is not None, "desktop: the page's session arrives")
     ck(pg.locator('#btn-dir').is_hidden() and pg.locator('#mode-code.on').count() == 1, "page: in code, no folder browsing; the menu says code")
     ck("proj" in pg.inner_text('#project-list'), "page: the menu lists the project (the shared folder)")
+    ck(pg.locator('#here').is_visible(), "page: in a session, the folder's own chats show too")
     for mo in pg.locator('.modal').all(): print("modal open:", mo.inner_text().replace("\n", " | "))
     if os.environ.get("DEBUG"):
         print(open(W + "/relay.out").read()[-3000:]); print("\n".join(l for l in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen).decode(errors="replace").splitlines() if "remote" in l or "relay" in l)); print(errs)
@@ -202,7 +203,8 @@ with sync_playwright() as p:
     said = seen.count(b"a device on your account connected")
     wp.reload(); wp.wait_for_timeout(4000)
     ck(wp.inner_text('#send').strip() == 'stop', "webkit: a reload mid-turn still offers stop")
-    held = subprocess.run(["lsof", "-nP", "-a", "-c", "curl", "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True).stdout
+    kids = ",".join(subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split())
+    held = subprocess.run(["lsof", "-nP", "-a", "-p", kids, "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True).stdout if kids else ""
     ck(not held.strip(), "desktop: the curls hako starts do not inherit its listening socket")
     ck(said >= 1 and seen.count(b"a device on your account connected") == said
        and "device on your account" not in wp.inner_text('#log'),
@@ -219,14 +221,33 @@ with sync_playwright() as p:
     wb.close()
     pg.click('#mode-chat'); pg.wait_for_timeout(2000)
     ck('#remote=' not in pg.url and pg.locator('#mode-chat.on').count() == 1, "page: chat goes back to this browser's own agent")
+    pg.wait_for_timeout(1500)
+    ck(pg.locator('#projects').is_visible() and pg.locator('#here').is_visible()
+       and pg.locator('#project-list .sess.k-code:has-text("proj")').count() == 1
+       and pg.locator('#sessions .sess.k-code').count() == 0,
+       "page: signed in, chat lists the code sessions (marked code) and this browser's chats together")
     pg.click('#mode-code'); pg.wait_for_timeout(3000)
+    ck(pg.locator('#here').is_hidden() and pg.locator('#project-list .sess.k-code').count() == 1, "page: code lists code sessions only")
     ck('#remote=' not in pg.url and pg.locator('.modal').count() == 0 and "proj" in pg.inner_text('#project-list')
        and "add a device" in pg.inner_text('#project-list'), "page: code lists the sessions in the menu, with add a device, no popup")
     pg.locator('#project-list button:has-text("add a device")').click()
     ck(":remote on" in pg.locator('.modal').inner_text(), "page: add a device says to run :remote on in the folder")
     pg.locator('.modal button:has-text("close")').click()
+    # the computer's upload dies while its download lives (the relay still lists it online):
+    # hako must notice on the next keepalive and reconnect, or every reply vanishes
+    ups = subprocess.run(["pgrep", "-P", str(pid), "-f", "/v1/up"], capture_output=True, text=True).stdout.split()
+    for u in ups: os.kill(int(u), signal.SIGKILL)
+    pg.wait_for_timeout(32000)
     pg.locator('#project-list button:has-text("proj")').click(); pg.wait_for_timeout(3000)
     ck('#remote=' in pg.url, "page: a session in the list opens it")
+    ups2 = subprocess.run(["pgrep", "-P", str(pid), "-f", "/v1/up"], capture_output=True, text=True).stdout.split()
+    turns = pg.locator('.turn.model').count()
+    pg.fill('#input', 'hey after the upload died'); pg.click('#send')
+    try:
+        pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % turns, timeout=20000)
+        ck(len(ups) == 1 and len(ups2) == 1 and ups2 != ups, "desktop: a dead upload reconnects, and the session answers again")
+    except Exception as e:
+        ck(False, "desktop: a dead upload reconnects, and the session answers again (%s %s %s)" % (ups, ups2, str(e)[:50]))
     ck(not errs, "page: no JS errors %s" % errs[:2])
     b.close()
 
