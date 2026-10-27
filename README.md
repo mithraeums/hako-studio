@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.7-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.7"/>
+  <img src="https://img.shields.io/badge/version-v0.0.8-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.8"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -180,8 +180,11 @@ Inside a terminal hako, in the folder you want to share:
 :remote on
 ```
 
-The first time, a page opens to link this computer to your account (a passkey; accounts are
-invite-only for now, ask at contact@mithraeum.studio). After that, sign in at
+The first time, hako links this computer to your account: scan the QR code it shows with a
+phone signed in to hako, or sign in on the page it opens (accounts are invite-only for now, ask
+at contact@mithraeum.studio). Sign in with a passkey, GitHub, Google or an emailed code; a
+device that signed in without a passkey gets your account key from one that has it (`:remote
+pair` on a computer, ☰ → account → add a device in a browser). After that, sign in at
 **hako.mithraeum.studio** on a phone or another computer and ☰ → **code** lists what is
 running: one session per shared folder, named by folder and machine. Open one and you are in
 the same chat as the terminal. Tools still ask, answered from whichever side is first;
@@ -194,7 +197,8 @@ How it holds together:
 - **Sessions are end to end.** `Noise_XXpsk3_25519_ChaChaPoly_BLAKE2b`, with a pre-shared key
   derived from the account key, so only a device on your account can complete the handshake.
 - **The relay routes ciphertext.** It holds an account id, how you sign in (a passkey's public
-  key, or a keyed hash of your email, never the address), the wrapped account key, and your
+  key, or a keyed hash of your email or GitHub / Google account id, never the address, name or
+  a token), the wrapped account key, and your
   devices' public keys and sealed names. No chats, no content, no request logs.
 
 The relay is in [`relay/`](relay): one C file and libcrypto, GPL-3.0 like the rest.

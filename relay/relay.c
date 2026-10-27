@@ -19,6 +19,9 @@
  *   POST /v1/passkey/key      <cred> <wrapped>         the account key, wrapped by that passkey's prf
  *   POST /v1/email/start      <address>                mails a six-digit code
  *   POST /v1/email/verify     <code> <invite|->        -> <account> <new|old>
+ *   POST /v1/github/start                              -> <github authorize url>
+ *   POST /v1/github/verify    <code> <state> <invite|-> -> <account> <new|old>
+ *   POST /v1/google/start, /v1/google/verify           the same, by Google
  * and signed in to an account:
  *   GET  /v1/devices          lines "<id> <pub hex> <online 0|1> <sealed name|->"
  *   POST /v1/bind             <pub hex>                adds a device to this account
@@ -26,8 +29,11 @@
  *   POST /v1/revoke           <device id>
  *
  * Stored (RELAY.md §6): account ids, passkey public keys and their wrapped
- * account keys, keyed hashes of sign-in emails, device public keys with sealed
- * names, spent invites. Never an email address, an IP or a frame.
+ * account keys, keyed hashes of sign-in emails and GitHub or Google account
+ * ids, device public keys with sealed names, spent invites. Never an email
+ * address, a GitHub or Google token, an IP or a frame. GitHub sign-in reads
+ * <dir>/github ("<client id> <client secret>"), Google <dir>/google, and both
+ * ask the provider through curl, its config on stdin.
  *
  *   relay invite [n] [-d dir]   prints n single-use invite codes
  */
@@ -65,7 +71,6 @@
 #define MAX_LINE   (MAX_B64 + 64)
 #define RATE_BPS   (1024.0 * 1024.0)            /* per device, sustained */
 #define RATE_BURST (4.0 * 1024.0 * 1024.0)
-#define AUTH_PER_MIN 30                         /* per IP */
 #define TOKEN_LIFE 3600
 #define KEEPALIVE_S 25
 #define UP_IDLE_S  900
@@ -97,6 +102,12 @@ typedef struct {
 	char mail_hash[65], mail_code[65];
 	time_t mail_exp;
 	int mail_tries;
+	char sso_state[33];        /* the open GitHub or Google sign-in, one try */
+	int sso_p;                 /* which of ssos[] it is */
+	time_t sso_exp;
+	char hold[65];             /* a sign-in that stopped at "invite needed": its login hash */
+	time_t hold_exp;
+	int hold_tries;
 } Dev;
 
 typedef struct { int used; char id[17]; } Acct;
@@ -114,6 +125,7 @@ static pthread_mutex_t dlock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t clock_ = PTHREAD_MUTEX_INITIALIZER;
 static int conns;
 static int verbose, dev_mode;
+static int auth_per_min = 30;                          /* sign-in steps per IP per minute (-l) */
 
 static Acct accts[MAX_ACCT];
 static Cred creds[MAX_CRED];
@@ -125,6 +137,24 @@ static char data_dir[512] = "relay-data";
 static char origin[256] = "http://localhost:8791";
 static char rp_id[256] = "localhost";
 static char mailer[512];
+/* A sign-in provider: its three endpoints (-G points them at a fake) and
+   <dir>/<name> ("<client id> <client secret>"; empty = off). oidc: Google's
+   flavor, with a redirect_uri, scope openid and a string "sub". */
+typedef struct {
+	const char *name;
+	int oidc;
+	char auth[256], token[256], user[256];
+	char id[128], secret[96];
+} Sso;
+static Sso ssos[] = {
+	{ "github", 0, "https://github.com/login/oauth/authorize", "https://github.com/login/oauth/access_token",
+	  "https://api.github.com/user", "", "" },
+	{ "google", 1, "https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token",
+	  "https://openidconnect.googleapis.com/v1/userinfo", "", "" },
+};
+#define NSSO ((int)(sizeof ssos / sizeof ssos[0]))
+static char redirect_enc[800];                         /* "<origin>/", form-encoded */
+static char sso_on[64];                                /* the startup line's ", sign-in by github google" */
 static unsigned char secret[32];
 
 /* ---- small helpers ---- */
@@ -633,7 +663,7 @@ static int ip_allow(const char *ip) {
 		s->n = 0;
 		s->start = now;
 	}
-	int ok = ++s->n <= AUTH_PER_MIN;
+	int ok = ++s->n <= auth_per_min;
 	pthread_mutex_unlock(&dlock);
 	return ok;
 }
@@ -1047,13 +1077,22 @@ static int email_norm(char *out, size_t cap, const char *in) {
 	return at == 1 && out[0] != '@' && out[n - 1] != '@' ? 0 : -1;
 }
 
+/* A pipe no other child inherits: each sign-in thread forks, and a stray write
+   end held by someone else's curl would keep this one's stdin open. */
+static int pipe_cx(int p[2]) {
+	if (pipe(p)) return -1;
+	fcntl(p[0], F_SETFD, FD_CLOEXEC);
+	fcntl(p[1], F_SETFD, FD_CLOEXEC);
+	return 0;
+}
+
 /* Hands the code to the mailer (`<mailer> -t`, message on stdin), or in --dev
    prints it. The address goes no further than the mailer's stdin. */
 static int send_code(const char *addr, const char *code) {
 	if (dev_mode) { fprintf(stderr, "relay: sign-in code %s\n", code); return 0; }
 	if (!mailer[0]) return -1;
 	int p[2];
-	if (pipe(p)) return -1;
+	if (pipe_cx(p)) return -1;
 	pid_t pid = fork();
 	if (pid == 0) {
 		int nul = open("/dev/null", O_WRONLY);
@@ -1105,10 +1144,52 @@ static void route_email_start(int fd, Body *b, Dev *d, const char *ip) {
 	reply(fd, ok ? "200 OK" : "503 Service Unavailable", ok ? "sent\n" : "email sign-in is off\n");
 }
 
-/* <code> <invite|->. The address's account, a new one with an invite, or (for
-   a device already signed in) the address added to its account. */
+/* Signs d in by h, the keyed hash of an email or a GitHub or Google id, and answers
+   "<account> <new|old>": the hash's account, a new one with an invite, or
+   (for a device already in an account) the hash added to that account.
+   Nonzero when it answered with an error. */
+static int login_take(int fd, Dev *d, const char *h, const char *invite) {
+	char acct[17], out[32];
+	const char *err = NULL;
+	int made = 0;
+	dev_acct(d, acct);
+	pthread_mutex_lock(&slock);
+	Login *hit = NULL, *spare = NULL;
+	for (int i = 0; i < MAX_LOGIN; i++) {
+		if (logins[i].used && !strcmp(logins[i].hash, h)) hit = &logins[i];
+		else if (!logins[i].used && !spare) spare = &logins[i];
+	}
+	if (hit && acct[0] && strcmp(hit->acct, acct)) err = "409 Conflict";
+	else if (hit) memcpy(acct, hit->acct, 17);
+	else if (!spare) err = "503 Service Unavailable";
+	else {
+		if (!acct[0]) {
+			Acct *a = strcmp(invite, "-") && invite_take(invite) ? acct_new() : NULL;
+			if (a) { memcpy(acct, a->id, 17); made = 1; }
+			else err = "402 Payment Required";                           /* stands for "invite needed" */
+		}
+		if (!err) { spare->used = 1; memcpy(spare->acct, acct, 17); memcpy(spare->hash, h, 65); }
+	}
+	if (!err && (dev_bind_locked(d, acct) || store_save())) err = "503 Service Unavailable";
+	pthread_mutex_unlock(&slock);
+	pthread_mutex_lock(&dlock);
+	if (err && !strncmp(err, "402", 3) && strcmp(d->hold, h)) {        /* route_invite's retries keep their count */
+		memcpy(d->hold, h, 65);
+		d->hold_exp = time(NULL) + 600;
+		d->hold_tries = 0;
+	}
+	else if (!err) d->hold[0] = '\0';
+	pthread_mutex_unlock(&dlock);
+	if (err) { reply(fd, err, !strncmp(err, "402", 3) ? "invite needed\n" : "no\n"); return -1; }
+	dev_bound(d, acct);
+	snprintf(out, sizeof out, "%s %s\n", acct, made ? "new" : "old");
+	reply(fd, "200 OK", out);
+	return 0;
+}
+
+/* <code> <invite|->: the address's account (login_take). */
 static void route_email_verify(int fd, Body *b, Dev *d, const char *ip) {
-	char line[200], *f[2], h[65], acct[17], out[32];
+	char line[200], *f[2], h[65];
 	unsigned char cd[32];
 	if (!ip_allow(ip)) { reply(fd, "429 Too Many Requests", "slow down\n"); return; }
 	if (body_line(b, line, sizeof line) < 0 || fields(line, f, 2) != 2 || strlen(f[0]) != 6) { reply(fd, "400 Bad Request", "fields\n"); return; }
@@ -1117,39 +1198,190 @@ static void route_email_verify(int fd, Body *b, Dev *d, const char *ip) {
 	char want[65];
 	memcpy(h, d->mail_hash, 65);
 	memcpy(want, d->mail_code, 65);
-	memcpy(acct, d->acct, 17);
 	pthread_mutex_unlock(&dlock);
 	sha256(cd, f[0], 6, h, 64);
 	char got[65];
 	hex_enc(got, cd, 32);
 	if (!live || CRYPTO_memcmp(got, want, 64)) { reply(fd, "403 Forbidden", "wrong or expired code\n"); return; }
-	const char *err = NULL;
-	pthread_mutex_lock(&slock);
-	Login *hit = NULL, *spare = NULL;
-	for (int i = 0; i < MAX_LOGIN; i++) {
-		if (logins[i].used && !strcmp(logins[i].hash, h)) hit = &logins[i];
-		else if (!logins[i].used && !spare) spare = &logins[i];
-	}
-	int made = 0;
-	if (hit && acct[0] && strcmp(hit->acct, acct)) err = "409 Conflict";
-	else if (hit) memcpy(acct, hit->acct, 17);
-	else if (!spare) err = "503 Service Unavailable";
-	else {
-		if (!acct[0]) {
-			Acct *a = strcmp(f[1], "-") && invite_take(f[1]) ? acct_new() : NULL;
-			if (a) { memcpy(acct, a->id, 17); made = 1; }
-			else err = "402 Payment Required";                           /* stands for "invite needed" */
-		}
-		if (!err) { spare->used = 1; memcpy(spare->acct, acct, 17); memcpy(spare->hash, h, 65); }
-	}
-	if (!err && (dev_bind_locked(d, acct) || store_save())) err = "503 Service Unavailable";
-	pthread_mutex_unlock(&slock);
-	if (err) { reply(fd, err, !strncmp(err, "402", 3) ? "invite needed\n" : "no\n"); return; }
+	pthread_mutex_lock(&dlock);
+	d->hold[0] = '\0';
+	pthread_mutex_unlock(&dlock);
+	if (login_take(fd, d, h, f[1])) return;
 	pthread_mutex_lock(&dlock);
 	d->mail_code[0] = '\0';
 	pthread_mutex_unlock(&dlock);
-	dev_bound(d, acct);
-	snprintf(out, sizeof out, "%s %s\n", acct, made ? "new" : "old");
+}
+
+/* ---- GitHub and Google sign-in: the relay trades the provider's one-time
+   code for the account's id and keeps only its keyed hash, like an email ---- */
+
+#define SSO_CHARS "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+
+static int sso_safe(const char *s, size_t max, const char *set) {
+	size_t n = strlen(s);
+	return n && n <= max && strspn(s, set) == n;
+}
+
+/* s as a form value ("" when it would not fit). */
+static void form_enc(char *out, size_t cap, const char *s) {
+	size_t j = 0;
+	for (; *s && j + 4 < cap; s++) {
+		if (strchr(SSO_CHARS "~", *s)) out[j++] = *s;
+		else j += (size_t)snprintf(out + j, cap - j, "%%%02X", (unsigned char)*s);
+	}
+	out[*s ? 0 : j] = '\0';
+}
+
+/* curl with its whole config on stdin (-K -): the client secret and the token
+   never reach argv, where ps shows them. Returns the body's length or -1. */
+static long curl_run(const char *config, char *out, size_t cap) {
+	int in[2], o[2];
+	if (pipe_cx(in)) return -1;
+	if (pipe_cx(o)) { close(in[0]); close(in[1]); return -1; }
+	pid_t pid = fork();
+	if (pid == 0) {
+		int nul = open("/dev/null", O_WRONLY);
+		dup2(in[0], 0); dup2(o[1], 1);
+		if (nul >= 0) dup2(nul, 2);
+		execlp("curl", "curl", "-sSf", "--max-time", "10", "--proto", dev_mode ? "=http,https" : "=https", "-K", "-", (char *)NULL);
+		_exit(127);
+	}
+	close(in[0]); close(o[1]);
+	long n = 0;
+	if (pid >= 0) {
+		for (size_t w = 0, len = strlen(config); w < len; ) {               /* a pipe: send() would refuse it */
+			ssize_t k = write(in[1], config + w, len - w);
+			if (k < 0 && errno == EINTR) continue;
+			if (k <= 0) break;
+			w += (size_t)k;
+		}
+		close(in[1]);
+		ssize_t r;
+		while ((r = read(o[0], out + n, cap - 1 - (size_t)n)) > 0 && (size_t)(n += r) < cap - 1) {}
+	} else close(in[1]);
+	close(o[0]);
+	out[n] = '\0';
+	int st = 0;
+	while (pid >= 0 && waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+	return pid >= 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0 ? n : -1;
+}
+
+/* The provider's id for the account behind a sign-in code: GitHub's numeric
+   "id", Google's "sub". The token is wiped once the provider answers. */
+static int sso_user(const Sso *s, const char *code, char *uid, size_t cap) {
+	char cfg[4096], resp[8192], tok[2048], c[1600];
+	const char *p;
+	int rc = -1;
+	form_enc(c, sizeof c, code);
+	snprintf(cfg, sizeof cfg, "url = \"%s\"\nheader = \"Accept: application/json\"\n"
+	         "data = \"client_id=%s&client_secret=%s&code=%s%s%s\"\n", s->token, s->id, s->secret, c,
+	         s->oidc ? "&grant_type=authorization_code&redirect_uri=" : "", s->oidc ? redirect_enc : "");
+	if (curl_run(cfg, resp, sizeof resp) >= 0 && !json_str(resp, "access_token", tok, sizeof tok) && sso_safe(tok, sizeof tok - 1, SSO_CHARS)) {
+		snprintf(cfg, sizeof cfg, "url = \"%s\"\nheader = \"Accept: %s\"\n"
+		         "header = \"Authorization: Bearer %s\"\nuser-agent = \"hako-relay\"\n",
+		         s->user, s->oidc ? "application/json" : "application/vnd.github+json", tok);
+		if (curl_run(cfg, resp, sizeof resp) < 0) {}
+		else if (s->oidc) rc = !json_str(resp, "sub", uid, cap) && sso_safe(uid, 255, SSO_CHARS) ? 0 : -1;
+		else if ((p = strstr(resp, "\"id\""))) {
+			p += 4;
+			while (*p == ' ') p++;
+			if (*p++ == ':') {
+				while (*p == ' ') p++;
+				size_t n = strspn(p, "0123456789");
+				if (n && n < 20 && n < cap) { memcpy(uid, p, n); uid[n] = '\0'; rc = 0; }
+			}
+		}
+	}
+	OPENSSL_cleanse(cfg, sizeof cfg);
+	OPENSSL_cleanse(tok, sizeof tok);
+	OPENSSL_cleanse(resp, sizeof resp);
+	return rc;
+}
+
+/* Which provider a route "<name>/<what> ..." names, or -1. */
+static int sso_at(const char *r, const char *what) {
+	size_t w = strlen(what);
+	for (int i = 0; i < NSSO; i++) {
+		size_t n = strlen(ssos[i].name);
+		if (!strncmp(r, ssos[i].name, n) && r[n] == '/' && !strncmp(r + n + 1, what, w) && r[n + 1 + w] == ' ') return i;
+	}
+	return -1;
+}
+
+/* Opens a sign-in for this device and answers the URL to send the browser to.
+   GitHub gets no scope (public profile only); Google gets openid alone, the
+   least it offers, and its userinfo then holds nothing but the "sub". */
+static void route_sso_start(int fd, Dev *d, const char *ip, int i) {
+	const Sso *s = &ssos[i];
+	char st[33], url[1400], m[64];
+	if (!ip_allow(ip)) { reply(fd, "429 Too Many Requests", "slow down\n"); return; }
+	if (!s->id[0]) { snprintf(m, sizeof m, "%s sign-in is off\n", s->name); reply(fd, "503 Service Unavailable", m); return; }
+	rand_hex(st, 16);
+	if (!st[0]) { reply(fd, "503 Service Unavailable", "no\n"); return; }
+	pthread_mutex_lock(&dlock);
+	memcpy(d->sso_state, st, 33);
+	d->sso_p = i;
+	d->sso_exp = time(NULL) + 600;
+	pthread_mutex_unlock(&dlock);
+	if (s->oidc) snprintf(url, sizeof url, "%s?client_id=%s&redirect_uri=%s&response_type=code&scope=openid&state=%s&prompt=select_account\n",
+	                      s->auth, s->id, redirect_enc, st);
+	else snprintf(url, sizeof url, "%s?client_id=%s&state=%s&allow_signup=true\n", s->auth, s->id, st);
+	reply(fd, "200 OK", url);
+}
+
+/* <code> <state> <invite|->: the provider sent the browser back with these.
+   Google's codes carry a '/'. */
+static void route_sso_verify(int fd, Body *b, Dev *d, const char *ip, int i) {
+	const Sso *s = &ssos[i];
+	char line[800], *f[3], h[65], uid[256], m[64];
+	if (!ip_allow(ip)) { reply(fd, "429 Too Many Requests", "slow down\n"); return; }
+	if (body_line(b, line, sizeof line) < 0 || fields(line, f, 3) != 3 || !sso_safe(f[0], 512, SSO_CHARS "/") || strlen(f[1]) != 32) {
+		reply(fd, "400 Bad Request", "fields\n");
+		return;
+	}
+	pthread_mutex_lock(&dlock);
+	int live = s->id[0] && d->sso_state[0] && d->sso_p == i && d->sso_exp >= time(NULL) && !CRYPTO_memcmp(d->sso_state, f[1], 32);
+	d->sso_state[0] = '\0';                                             /* one try per start */
+	pthread_mutex_unlock(&dlock);
+	if (!live) { reply(fd, "403 Forbidden", "start again\n"); return; }
+	if (sso_user(s, f[0], uid, sizeof uid)) {
+		snprintf(m, sizeof m, "%s did not confirm that sign-in\n", s->name);
+		reply(fd, "502 Bad Gateway", m);
+		return;
+	}
+	keyed_hash(h, s->name, uid);
+	OPENSSL_cleanse(uid, sizeof uid);
+	pthread_mutex_lock(&dlock);
+	d->hold[0] = '\0';                                                 /* a fresh sign-in starts a fresh hold */
+	pthread_mutex_unlock(&dlock);
+	login_take(fd, d, h, f[2]);
+}
+
+/* <invite>: finishes a sign-in that stopped at "invite needed" (login_take
+   kept its login hash on this device for ten minutes), so GitHub or Google
+   need not ask again and an email code need not be typed again. */
+static void route_invite(int fd, Body *b, Dev *d, const char *ip) {
+	char line[64], h[65];
+	if (!ip_allow(ip)) { reply(fd, "429 Too Many Requests", "slow down\n"); return; }
+	if (body_line(b, line, sizeof line) <= 0) { reply(fd, "400 Bad Request", "want: <invite>\n"); return; }
+	pthread_mutex_lock(&dlock);
+	int live = d->hold[0] && d->hold_exp >= time(NULL) && d->hold_tries++ < 5;
+	memcpy(h, d->hold, 65);
+	pthread_mutex_unlock(&dlock);
+	if (!live) { reply(fd, "403 Forbidden", "sign in again\n"); return; }
+	login_take(fd, d, h, line);
+}
+
+/* "<account> <passkeys holding the account key>": with route_devices, a
+   browser without K learns whether anyone could give it one. */
+static void route_account(int fd, const char *acct) {
+	char out[40];
+	int n = 0;
+	pthread_mutex_lock(&slock);
+	for (int i = 0; i < MAX_CRED; i++)
+		if (creds[i].used && !strcmp(creds[i].acct, acct) && creds[i].wrapped[0]) n++;
+	pthread_mutex_unlock(&slock);
+	snprintf(out, sizeof out, "%s %d\n", acct, n);
 	reply(fd, "200 OK", out);
 }
 
@@ -1292,18 +1524,26 @@ static void *conn_thread(void *arg) {
 		                 "Content-Length: 0\r\nConnection: close\r\n\r\n", cors);
 		send_all(fd, head, (size_t)n);
 	}
-	else if (!strncmp(req, "GET /v1/health ", 15)) reply(fd, "200 OK", mailer[0] || dev_mode ? "ok mail\n" : "ok\n");   /* mail: email codes work */
+	else if (!strncmp(req, "GET /v1/health ", 15)) {                  /* the sign-ins that work here */
+		char h[64] = "ok";
+		if (mailer[0] || dev_mode) strcat(h, " mail");
+		for (int i = 0; i < NSSO; i++) if (ssos[i].id[0]) { strcat(h, " "); strcat(h, ssos[i].name); }
+		strcat(h, "\n");
+		reply(fd, "200 OK", h);
+	}
 	else if (!strncmp(req, "POST /v1/auth/challenge ", 24)) route_challenge(fd, &b, ip);
 	else if (!strncmp(req, "POST /v1/auth/prove ", 20)) route_prove(fd, &b, ip);
 	else if (!strncmp(req, "GET /v1/", 8) || !strncmp(req, "POST /v1/", 9)) {
 		Dev *d = dev_by_token(req);
 		char acct[17] = "";
 		const char *r = req + (req[0] == 'G' ? 8 : 9);
+		int si;
 		if (d) dev_acct(d, acct);
 		if (!d) reply(fd, "401 Unauthorized", "sign in\n");
 		else if (!strncmp(req, "GET /v1/down ", 13)) route_down(fd, d);
 		else if (req[0] == 'G') {
 			if (!strncmp(r, "devices ", 8) && acct[0]) route_devices(fd, acct);
+			else if (!strncmp(r, "account ", 8) && acct[0]) route_account(fd, acct);
 			else reply(fd, acct[0] ? "404 Not Found" : "403 Forbidden", "no\n");
 		}
 		else if (!strncmp(r, "up ", 3)) route_up(fd, &b, d);
@@ -1312,6 +1552,9 @@ static void *conn_thread(void *arg) {
 		else if (!strncmp(r, "passkey/login ", 14)) route_pk_login(fd, &b, d, ip);
 		else if (!strncmp(r, "email/start ", 12)) route_email_start(fd, &b, d, ip);
 		else if (!strncmp(r, "email/verify ", 13)) route_email_verify(fd, &b, d, ip);
+		else if ((si = sso_at(r, "start")) >= 0) route_sso_start(fd, d, ip, si);
+		else if ((si = sso_at(r, "verify")) >= 0) route_sso_verify(fd, &b, d, ip, si);
+		else if (!strncmp(r, "invite ", 7)) route_invite(fd, &b, d, ip);
 		else if (!acct[0]) reply(fd, "403 Forbidden", "sign in to an account\n");
 		else if (!strncmp(r, "passkey/key ", 12)) route_pk_key(fd, &b, d);
 		else if (!strncmp(r, "bind ", 5)) route_bind(fd, &b, acct);
@@ -1369,17 +1612,20 @@ static int load_secret(void) {
 
 int main(int argc, char **argv) {
 	int port = 8790, invites = -1;
+	const char *sso_base = NULL;                                      /* a fake GitHub and Google, for tests */
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-p") && i + 1 < argc) port = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-d") && i + 1 < argc) snprintf(data_dir, sizeof data_dir, "%s", argv[++i]);
 		else if (!strcmp(argv[i], "-o") && i + 1 < argc) snprintf(origin, sizeof origin, "%s", argv[++i]);
 		else if (!strcmp(argv[i], "-m") && i + 1 < argc) snprintf(mailer, sizeof mailer, "%s", argv[++i]);
+		else if (!strcmp(argv[i], "-l") && i + 1 < argc && atoi(argv[i + 1]) > 0) auth_per_min = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "-G") && i + 1 < argc) sso_base = argv[++i];
 		else if (!strcmp(argv[i], "--dev")) dev_mode = 1;
 		else if (!strcmp(argv[i], "-v")) verbose = 1;
 		else if (!strcmp(argv[i], "--version")) { printf("relay v%s\n", RELAY_VERSION); return 0; }
 		else if (!strcmp(argv[i], "invite") && i == 1) invites = (i + 1 < argc && argv[i + 1][0] != '-') ? atoi(argv[++i]) : 1;
 		else {
-			fprintf(stderr, "usage: relay [-p port] [-d dir] [-o origin] [-m mailer] [--dev] [-v]   (listens on 127.0.0.1)\n"
+			fprintf(stderr, "usage: relay [-p port] [-d dir] [-o origin] [-m mailer] [-l sign-ins per IP per minute] [--dev [-G fake github/google]] [-v]   (listens on 127.0.0.1)\n"
 			                "       relay invite [n] [-d dir]\n");
 			return 2;
 		}
@@ -1391,10 +1637,35 @@ int main(int argc, char **argv) {
 	if (mkdir(data_dir, 0700) && errno != EEXIST) { fprintf(stderr, "relay: cannot make %s\n", data_dir); return 1; }
 	if (invites >= 0) return cmd_invite(invites > 0 && invites <= 1000 ? invites : 1);
 	if (load_secret()) { fprintf(stderr, "relay: cannot read or make %s/secret\n", data_dir); return 1; }
+	if (sso_base && !dev_mode) { fprintf(stderr, "relay: -G is for --dev tests\n"); return 2; }
+	{
+		char red[300];
+		snprintf(red, sizeof red, "%s/", origin);
+		form_enc(redirect_enc, sizeof redirect_enc, red);
+		for (int i = 0; i < NSSO; i++) {
+			Sso *s = &ssos[i];
+			char path[600], *eps[3] = { s->auth, s->token, s->user };
+			for (int e = 0; sso_base && e < 3; e++) {                 /* keep the path, swap the host */
+				const char *q = strstr(eps[e], "://");
+				char tail[256];
+				snprintf(tail, sizeof tail, "%s", q && (q = strchr(q + 3, '/')) ? q : "/");
+				snprintf(eps[e], sizeof s->auth, "%.120s%.130s", sso_base, tail);
+			}
+			snprintf(path, sizeof path, "%s/%s", data_dir, s->name);
+			FILE *g = fopen(path, "r");
+			if (g && (fscanf(g, "%127s %95s", s->id, s->secret) != 2 || !sso_safe(s->id, 127, SSO_CHARS) || !sso_safe(s->secret, 95, SSO_CHARS))) {
+				fprintf(stderr, "relay: %s should be \"<client id> <client secret>\"\n", path);
+				s->id[0] = s->secret[0] = '\0';
+			}
+			if (g) fclose(g);
+			if (s->id[0]) { strcat(sso_on, sso_on[0] ? " " : ", sign-in by "); strcat(sso_on, s->name); }
+		}
+	}
 	store_load();
 	signal(SIGPIPE, SIG_IGN);
 	int srv = socket(AF_INET, SOCK_STREAM, 0), yes = 1;
 	setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+	fcntl(srv, F_SETFD, FD_CLOEXEC);                                  /* kept from curl and the mailer */
 	struct sockaddr_in sa;
 	memset(&sa, 0, sizeof sa);
 	sa.sin_family = AF_INET;
@@ -1404,10 +1675,12 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "relay: cannot listen on 127.0.0.1:%d: %s\n", port, strerror(errno));
 		return 1;
 	}
-	fprintf(stderr, "relay v%s on 127.0.0.1:%d for %s%s\n", RELAY_VERSION, port, origin, dev_mode ? " (dev: codes print here)" : "");
+	fprintf(stderr, "relay v%s on 127.0.0.1:%d for %s%s%s\n", RELAY_VERSION, port, origin,
+	        sso_on, dev_mode ? " (dev: codes print here)" : "");
 	for (;;) {
 		int fd = accept(srv, NULL, NULL);
 		if (fd < 0) { if (errno == EINTR || errno == ECONNABORTED) continue; sleep(1); continue; }
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
 		pthread_mutex_lock(&clock_);
 		int full = conns >= MAX_CONN;
 		if (!full) conns++;

@@ -2,6 +2,7 @@
 hako.c
 hako.wasm
 dist/
+dist-remote/
 
 # Screen recordings and the stills cut from them. Kept local like the other
 # repos keep their vhs/ — the published assets live in the website repo, at
@@ -17,3 +18,6 @@ recordings/
 
 # the relay binary (relay/Makefile builds it next to its source)
 relay/relay
+# a relay's data dir (its default when run here): the hashing key, the store,
+# sign-in secrets. never in a repo
+relay-data/
