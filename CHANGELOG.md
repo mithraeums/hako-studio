@@ -4,6 +4,37 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
+## [Unreleased]
+
+## [v0.0.8] - 2026-10-27
+
+### added
+- a `:remote pair` code opens this page as "add this device": sign in (an emailed code is fine) and the browser gets your account key from that computer, so code sessions open here too. a signed-in browser without the key now says how to get it
+- sign in with GitHub, once the relay is set up for it (`relay/deploy/deploy.sh github`). the relay keeps a keyed hash of your GitHub account id, never the id, your name or a token, and asks for no GitHub permissions. like an emailed code it does not carry your account key: use it mid `:remote pair`, or sign in with a passkey once
+- sign in with Google, the same way (`relay/deploy/deploy.sh google`). it asks Google for `openid` only, so the relay sees nothing but the account's id, and keeps only a keyed hash of that
+- relay: `POST /v1/github/start`, `/v1/github/verify` and the same two under `/v1/google/`; health says `github` and `google` when they are on. the client secrets and the tokens go to curl on stdin, never its arguments
+- an account row at the foot of the menu: "sign in", or who is signed in (GitHub, Google, a passkey or email, with that mark) and the first characters of the account id. it opens the account sheet: your code sessions, add a device, switch account, sign out
+- sign out drops this browser from the account on the relay as well as forgetting its keys here. switch account signs out, then asks GitHub which of its accounts (Google always asks)
+- add a device, on a browser that holds your account key: a QR code and a link. open it on a phone or another browser, sign in, and this browser hands it the key, sealed under a secret only the code carries, the way `:remote pair` does on a computer. one use, while the sheet stays open
+- a new account by GitHub, Google or email that stops at "invite needed" finishes with the invite: type it and continue, no second trip to GitHub or Google, no new code
+- a browser that holds the account key lists itself on the relay with a name sealed under it ("browser:iPhone · Safari"), like a computer does. when no device and no passkey holds the key, nothing is sealed under it, so a browser signing in makes a new one instead of waiting for a pairing that cannot come
+- relay: `POST /v1/invite` (finishes a sign-in held for ten minutes after "invite needed", five tries), `GET /v1/account` (the account id and how many passkeys hold its key), `-l` sets the sign-ins per IP per minute (30)
+
+### changed
+- the sign-in sheet: one wide button per way in, Google and GitHub with their own marks, a key for a passkey, an envelope for email; what an account keeps sits under the buttons instead of above them
+- fixed: coming back from GitHub or Google could fail with a 401. the page signed in twice at once, the relay keeps one token per device, and the page kept the one it replaced. sign-ins at once now share one
+- fixed: the "this runs in your browser" notice opened over the sign-in sheet on an invite link, a `#signin` link or a return from GitHub or Google. it waits for the next visit there
+- fixed: coming back from GitHub or Google after an invite or `#signin` link opened two sign-in sheets, one over the other
+- a browser without the account key says your code sessions are sealed with it and how to get it, instead of a red warning and "none open"; a passkey that is missing or cancelled says so instead of the browser's own error text
+- the sign-in sheet links the privacy page (mithraeum.studio/privacy), under what an account keeps
+- a link page (`:remote on`, now also a QR code in the terminal) opened on a browser without the account key says how to get it (add a device on one that has it, or a passkey), not just "sign in with your passkey"
+- relay: `make fuzz` sends mutated requests through the relay's request handler under ASan and UBSan, signed in with a passkey challenge and an email code open so they reach past the first check, plus the store loader and the passkey parsers. 200,000 inputs clean; two planted overflows are caught
+- `.gitignore` keeps a relay data dir (`relay-data/`: the hashing key, the store, sign-in secrets) out of the repo
+- relay: the email, GitHub and Google sign-ins share one account step, and the relay's sockets and pipes stay out of the processes it starts
+
+### fixed
+- the browser tab and home-screen icon could stay the old art: browsers cache an icon by its address, and the new one kept the old address. it has a new one now
+
 ## [v0.0.7] - 2026-10-25
 
 ### changed

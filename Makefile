@@ -181,5 +181,5 @@ ui-test:
 # pty) through a real relay, then a fresh browser signs in and drives a turn.
 remote-test:
 	@$(MAKE) --no-print-directory -C relay relay
-	@$(MAKE) --no-print-directory site RELAY_URL=http://127.0.0.1:18793
+	@$(MAKE) --no-print-directory site RELAY_URL=http://127.0.0.1:18793 DIST=dist-remote
 	python3 tools/remote-test.py

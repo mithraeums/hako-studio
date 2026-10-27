@@ -24,8 +24,8 @@
 <meta name="apple-mobile-web-app-title" content="hako">
 <!-- Real resources, not data: URIs — iOS ignores a data URI for a touch icon.
      Both are served by the binary out of the same embedded bundle. -->
-<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
-<link rel="icon" type="image/png" href="/icon-180.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png?v=2">
+<link rel="icon" type="image/png" href="/icon-180.png?v=2">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>hako</title>
 <style>
@@ -109,6 +109,25 @@
 	.sessrow .act:hover { border-color: var(--line); }
 	.sessrow .act.ren:hover { color: var(--gold); }
 	.sessrow .act.del:hover { color: var(--err); }
+
+	/* who is signed in, at the foot of the menu, like every app with accounts */
+	.acct { margin-top: auto; border-top: 1px solid var(--line); padding: .4rem; }
+	.acct[hidden] { display: none; }
+	.acct button { display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; border-color: transparent; padding: .45rem .5rem; }
+	.acct button:hover { border-color: var(--line); }
+	.acct .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.acct .who span { display: block; color: var(--faint); font-size: 10px; }
+	.ico { width: 18px; height: 18px; flex: none; }
+	/* the sign-in choices: one wide button each, the provider's own mark on the left */
+	.signin { display: flex; flex-direction: column; gap: .45rem; padding: .55rem; }
+	.signin button { display: flex; align-items: center; justify-content: center; gap: .6rem; width: 100%; padding: .6rem .8rem; font-size: 13px; }
+	.signin .or { text-align: center; color: var(--faint); font-size: 11px; }
+	.acctinfo { display: flex; align-items: center; gap: .6rem; padding: .55rem; }
+	.acctinfo .ico { width: 22px; height: 22px; }
+	.acctinfo span { display: block; color: var(--faint); font-size: 11px; }
+	/* a pair code: always dark on white, whatever the theme, so a camera reads it */
+	.qr { display: block; width: min(220px, 64vw); height: auto; margin: .4rem auto; border-radius: 3px; }
+	.modal input.pairlink { font-size: 11px; color: var(--faint); }
 
 	.thinking { color: var(--gold); margin: 0 0 1rem; }
 	.thinking .frame { display: inline-block; width: 1.2em; }
@@ -318,6 +337,7 @@
 		<button id="btn-restart" title="Reload this folder — fresh session state, same agent">reload</button>
 	</div>
 	</div>
+	<div class="acct" id="acct" hidden></div>
 </aside>
 
 <main>
@@ -358,9 +378,23 @@ const HAKO_WASM_MODE = document.querySelector('meta[name="hako-mode"]')?.content
    it. #remote=<id> turns this page into that computer's front end: the same
    /api calls the LAN page makes, carried in numbered streams. */
 const RELAY_URL = document.querySelector('meta[name="hako-relay"]')?.content || 'https://relay.mithraeum.studio';
-const HASH = typeof location === 'object' ? location.hash : '';
+/* Back from GitHub or Google (?code=&state=, or ?error=): which one, the
+   fragment this page had before it left (a #pair= or #link= in progress)
+   and the invite typed. */
+const SSO_NAMES = { google: 'Google', github: 'GitHub' };
+const SSO_BACK = (() => {
+	try {
+		const q = new URLSearchParams(location.search), was = JSON.parse(sessionStorage.getItem('hako-sso') || 'null');
+		if (!was || !SSO_NAMES[was.p] || !q.get('state') || !(q.get('code') || q.get('error'))) return null;
+		sessionStorage.removeItem('hako-sso');
+		history.replaceState(null, '', location.pathname + (was.hash || ''));
+		return { p: was.p, code: q.get('code') || '', state: q.get('state'), error: q.get('error') || '', hash: was.hash || '', invite: was.invite || '' };
+	} catch (e) { return null; }
+})();
+const HASH = SSO_BACK ? SSO_BACK.hash : typeof location === 'object' ? location.hash : '';
 const REMOTE_ID = (HASH.match(/^#remote=([0-9a-f]{32})$/) || [])[1] || '';
 const LINK = HASH.match(/^#link=([0-9a-f]{64})\.([0-9a-f]{64})$/);
+const PAIR = HASH.match(/^#pair=([0-9a-f]{32})\.([0-9a-f]{64})$/);
 const INVITE = (HASH.match(/^#invite=([a-z0-9-]{10,16})$/i) || [])[1] || '';
 
 /* a test turns this on (window.hakoDebug) to see the streams; off, it costs nothing */
@@ -430,8 +464,13 @@ const relay = {
 	},
 	/* the device key proves itself: MAC keyed by X25519(s, the relay's one-off key).
 	   A token lives an hour on the relay; reuse it for ten minutes, since sign-ins are rate limited. */
-	async signIn() {
-		if (this.token && Date.now() - this.at < 600000) return;
+	/* One sign-in at a time: the relay keeps one token per device, so two at
+	   once leave this page holding the one the relay replaced (a 401). */
+	signIn() {
+		if (this.token && Date.now() - this.at < 600000) return Promise.resolve();
+		return this.signing || (this.signing = this.signInOnce().finally(() => { this.signing = null; }));
+	},
+	async signInOnce() {
 		await hk.load();
 		this.s = await kvGet('device');
 		if (!this.s) { this.s = hk.random(32); await kvSet('device', this.s); }
@@ -525,9 +564,71 @@ async function passkeyCreate(invite) {
 	return { acct: relay.acct, K, prf: !!prf };
 }
 
-/* Email codes only when the relay has a mailer (its health line says so). */
-async function relayMail() {
-	try { return /\bmail\b/.test(await (await fetch(RELAY_URL + '/v1/health')).text()); } catch (e) { return false; }
+/* The sign-ins this relay offers: its health line says "mail" with a mailer, "github" and "google" once set up. */
+async function relayHealth() {
+	try { return await (await fetch(RELAY_URL + '/v1/health')).text(); } catch (e) { return ''; }
+}
+
+/* The relay's answer to an email, GitHub or Google sign-in, "<account> <new|old>".
+   Neither carries K: a new account makes one, an old one waits for a passkey or :remote pair. */
+async function accountIn(text) {
+	const [acct, made] = text.split(' ');
+	if (made === 'new' || (await kvGet('acct')) !== acct) await kvSet('k', made === 'new' ? hk.random(32) : null);
+	relay.acct = acct;
+	await kvSet('acct', acct);
+	return { acct, K: await kvGet('k') };
+}
+
+/* What this browser calls itself to the account's other devices, sealed under K like a computer's name. */
+function browserName() {
+	const u = navigator.userAgent, touchMac = /Macintosh/.test(u) && navigator.maxTouchPoints > 1;
+	const dev = /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) || touchMac ? 'iPad' : /Android/.test(u) ? 'Android'
+		: /Mac/.test(u) ? 'Mac' : /Windows/.test(u) ? 'Windows' : /Linux/.test(u) ? 'Linux' : 'browser';
+	const app = /Edg\//.test(u) ? 'Edge' : /CriOS|Chrome\//.test(u) ? 'Chrome' : /FxiOS|Firefox\//.test(u) ? 'Firefox' : /Safari\//.test(u) ? 'Safari' : '';
+	return app ? dev + ' \u00b7 ' + app : dev;
+}
+
+/* K lives only on the devices that hold it: computers and browsers each list a
+   name sealed under it, and a passkey may keep it wrapped. When none of those
+   exist, nothing is sealed under the account's K and no one can hand it over,
+   so this browser makes a new one rather than wait for a pairing that cannot
+   come. A browser that holds K then lists itself, once per device key. */
+async function settleKey() {
+	if (!relay.acct) return;
+	let K = await kvGet('k');
+	if (!K) {
+		const [d, a] = await Promise.all([relay.req('GET', '/v1/devices'), relay.req('GET', '/v1/account')]);
+		if (d.status !== 200 || a.status !== 200) return;
+		const held = d.text.split('\n').some((l) => { const f = l.split(' '); return f[0] !== relay.id && f[3] && f[3] !== '-'; });
+		if (held || a.text.split(' ')[1] !== '0') return;
+		K = hk.random(32);
+		await kvSet('k', K);
+	}
+	if ((await kvGet('named')) === relay.id) return;
+	const name = new TextEncoder().encode('browser:' + browserName());
+	const n = hk.run('hkw_name_seal', cat(K, name), 32 + name.length);
+	if (n > 0 && (await relay.req('POST', '/v1/name', b64u(hk.out(n)))).status === 200) await kvSet('named', relay.id);
+}
+
+/* GitHub or Google (p) sends the browser back here with a code; the relay trades
+   it for the account id. Which one, the fragment and the invite ride along in
+   this tab's sessionStorage. */
+async function ssoStart(p, invite, pick) {
+	const r = await relay.req('POST', '/v1/' + p + '/start'), name = SSO_NAMES[p];
+	if (r.status !== 200) throw new Error(r.status === 503 ? name + ' sign-in is off right now' : 'can\u2019t reach ' + name + ' sign-in (' + r.status + ')');
+	sessionStorage.setItem('hako-sso', JSON.stringify({ p, hash: HASH, invite }));
+	/* switching accounts: GitHub asks which of its accounts (Google always does) */
+	location.href = r.text + (pick && p === 'github' ? '&prompt=select_account' : '');
+}
+
+async function ssoVerify(back) {
+	const name = SSO_NAMES[back.p];
+	if (back.error) throw new Error(back.error === 'access_denied' ? name + ' sign-in was cancelled' : name + ' said: ' + back.error);
+	const r = await relay.req('POST', '/v1/' + back.p + '/verify', back.code + ' ' + back.state + ' ' + (back.invite || '-'));
+	if (r.status === 402) throw Object.assign(new Error('a new account needs an invite code. type it below'), { invite: true });
+	if (r.status === 409) throw new Error('this browser is signed in to another account');
+	if (r.status !== 200) throw new Error(r.status === 403 ? 'that ' + name + ' sign-in expired. try again' : name + ' sign-in failed (' + r.status + ')');
+	return accountIn(r.text);
 }
 
 async function emailStart(addr) {
@@ -537,13 +638,55 @@ async function emailStart(addr) {
 
 async function emailVerify(code, invite) {
 	const r = await relay.req('POST', '/v1/email/verify', code.trim() + ' ' + (invite.trim() || '-'));
-	if (r.status === 402) throw new Error('a new account needs an invite code');
+	if (r.status === 402) throw Object.assign(new Error('a new account needs an invite code. type it below'), { invite: true });
 	if (r.status !== 200) throw new Error(r.status === 403 ? 'wrong or expired code' : 'sign-in failed (' + r.status + ')');
-	const [acct, made] = r.text.split(' ');
-	if (made === 'new' || (await kvGet('acct')) !== acct) await kvSet('k', made === 'new' ? hk.random(32) : null);
-	relay.acct = acct;
-	await kvSet('acct', acct);
-	return { acct, K: await kvGet('k') };
+	return accountIn(r.text);
+}
+
+/* A sign-in that stopped at "invite needed": the relay kept who it was for ten
+   minutes, so the invite finishes it without asking GitHub, Google or the inbox again. */
+async function inviteFinish(invite) {
+	const r = await relay.req('POST', '/v1/invite', invite.trim() || '-');
+	if (r.status === 402) throw new Error('that invite didn\u2019t work');
+	if (r.status === 403) throw new Error('that sign-in expired. sign in again');
+	if (r.status !== 200) throw new Error('sign-in failed (' + r.status + ')');
+	return accountIn(r.text);
+}
+
+/* Another browser of this account opened this one's pair code: answer its ask
+   (a 4 frame) with K and the account id sealed under the code's secret, as
+   :remote pair does on a computer. Resolves with that device's id; one use. */
+async function pairHost(secret, K, signal) {
+	const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token }, signal });
+	if (!r.ok) throw new Error('can\u2019t connect right now');
+	const rd = r.body.getReader(), dec = new TextDecoder();
+	let buf = '';
+	for (;;) {
+		const v = await rd.read();
+		if (v.done) throw new Error('the connection dropped. open add a device again');
+		buf += dec.decode(v.value, { stream: true });
+		let i;
+		while ((i = buf.indexOf('\n')) >= 0) {
+			const line = buf.slice(0, i), from = line.slice(0, 32);
+			buf = buf.slice(i + 1);
+			if (!/^[0-9a-f]{32} /.test(line) || line.slice(33) !== b64(new Uint8Array([4]))) continue;
+			hk.run('hkw_link', cat(secret, K, new TextEncoder().encode(relay.acct)));
+			if (await relay.send(from, cat(new Uint8Array([4]), hk.out(88)))) return from;
+		}
+	}
+}
+
+/* text as a QR code (hako.c's encoder), dark on light with its quiet zone. */
+function qrSvg(text) {
+	const t = new TextEncoder().encode(text), n = hk.run('hkw_qr', t, t.length);
+	if (n <= 0) return null;
+	const m = hk.out(n * n), z = 4;
+	let d = '';
+	for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (m[y * n + x]) d += 'M' + (x + z) + ' ' + (y + z) + 'h1v1h-1z';
+	const t2 = document.createElement('template');
+	t2.innerHTML = '<svg class="qr" viewBox="0 0 ' + (n + 2 * z) + ' ' + (n + 2 * z) + '" shape-rendering="crispEdges" role="img" aria-label="pair code">'
+		+ '<rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="' + d + '"/></svg>';
+	return t2.content.firstChild;
 }
 
 /* The link page (#link=<computer pub>.<secret>): bind that computer to this
@@ -551,7 +694,7 @@ async function emailVerify(code, invite) {
    which no server ever saw. */
 async function linkComputer(pubHex, secretHex) {
 	const K = await kvGet('k');
-	if (!K) throw new Error('this browser does not hold your account key yet: sign in with your passkey');
+	if (!K) throw new Error('this browser does not hold your account key yet. add it from a device that has it (account, add a device), or use your passkey, then open this link again');
 	const b = await relay.req('POST', '/v1/bind', pubHex);
 	if (b.status !== 200) throw new Error(b.status === 409 ? 'that computer is linked to another account' : 'could not link (' + b.status + ')');
 	hk.run('hkw_id', unhex(pubHex));
@@ -559,6 +702,49 @@ async function linkComputer(pubHex, secretHex) {
 	hk.run('hkw_link', cat(unhex(secretHex), K, new TextEncoder().encode(relay.acct)));
 	if (!(await relay.send(id, cat(new Uint8Array([3]), hk.out(88))))) throw new Error('couldn\u2019t reach that computer, try again');
 	history.replaceState(null, '', location.pathname);    /* the secret leaves the address bar */
+}
+
+/* The pair page (#pair=<computer id>.<secret>, from :remote pair's QR code):
+   ask that hako for K, which it seals under the secret in this URL's fragment,
+   so the relay carrying the answer cannot open it. One use, ten minutes. */
+async function pairDevice(idHex, secretHex) {
+	const ctl = new AbortController();
+	try {
+		await relay.signIn();
+		if (!relay.acct) throw new Error('sign in first');
+		const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token }, signal: ctl.signal });
+		if (!r.ok) throw new Error('can\u2019t connect right now');
+		const rd = r.body.getReader(), dec = new TextDecoder();
+		const answer = (async () => {
+			let buf = '';
+			for (;;) {
+				let v;
+				try { v = await rd.read(); } catch (e) { return null; }
+				if (v.done) return null;
+				buf += dec.decode(v.value, { stream: true });
+				let i;
+				while ((i = buf.indexOf('\n')) >= 0) {
+					const line = buf.slice(0, i); buf = buf.slice(i + 1);
+					if (line === '! offline ' + idHex) return null;
+					if (!line.startsWith(idHex + ' ')) continue;
+					const f = unb64(line.slice(33));
+					if (f[0] === 4 && f.length === 89) return f.subarray(1);
+				}
+			}
+		})();
+		await new Promise((res) => setTimeout(res, 150));
+		if (!(await relay.send(idHex, new Uint8Array([4])))) throw new Error('couldn\u2019t reach that computer, try again');
+		const m = await Promise.race([answer, new Promise((res) => setTimeout(() => res(null), 10000))]);
+		if (!m) throw new Error('no answer. a code works once, for 10 minutes: run :remote pair again');
+		if (hk.run('hkw_link_open', cat(unhex(secretHex), m))) throw new Error('that code doesn\u2019t match. run :remote pair again');
+		const o = hk.out(48), acct = new TextDecoder().decode(o.subarray(32)).replace(/\0+$/, '');
+		if (acct !== relay.acct) throw new Error('that computer is signed in to a different account');
+		await kvSet('k', o.slice(0, 32));
+		await kvSet('acct', relay.acct);
+	} finally {
+		ctl.abort();
+		history.replaceState(null, '', location.pathname);    /* the secret leaves the address bar */
+	}
 }
 
 /* The account's open code sessions: each seals "code:<host>\t<folder>" under
@@ -717,17 +903,102 @@ if (REMOTE_ID) {
 }
 
 /* ---- the account sheet ---- */
+/* The providers' own marks (GitHub's octicon, Google's G), a key for a passkey,
+   an envelope for email. Fixed strings, never built from input. */
+const ICONS = {
+	google: '<svg class="ico" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>',
+	github: '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
+	passkey: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4M18 5l2 2M15 8l2 2"/></svg>',
+	email: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+	out: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+};
+const VIA = { google: 'Google', github: 'GitHub', passkey: 'a passkey', email: 'email' };
+const icon = (k) => { const t = document.createElement('template'); t.innerHTML = ICONS[k] || ICONS.out; return t.content.firstChild; };
+/* a button with a mark on the left */
+const markBtn = (k, label, fn) => {
+	const b = document.createElement('button');
+	b.type = 'button';
+	b.append(icon(k), document.createTextNode(label));
+	b.addEventListener('click', fn);
+	return b;
+};
+
+let ssoBack = SSO_BACK;
 window.hakoAccount = {
 	enabled: HAKO_WASM_MODE,
-	async open(linkTo) {
-		const m = modal(linkTo ? 'link this computer' : 'code');
-		const say = (t, err) => { const n = document.createElement('div'); n.className = 'note'; if (err) n.style.color = 'var(--err)'; n.textContent = t; m.body.appendChild(n); return n; };
+	/* The foot of the menu: "sign in", or how this browser is signed in. From
+	   what is stored here until the relay has answered, then from the relay. */
+	async renderAcct() {
+		const el = $('acct');
+		if (!HAKO_WASM_MODE || !el) return;
+		const acct = relay.token ? relay.acct : (await kvGet('acct')) || '', via = await kvGet('via');
+		el.textContent = '';
+		const who = document.createElement('div');
+		who.className = 'who';
+		who.textContent = acct ? (VIA[via] ? 'signed in with ' + VIA[via] : 'signed in') : 'sign in';
+		who.appendChild(Object.assign(document.createElement('span'), { textContent: acct ? 'account ' + acct.slice(0, 8) : 'code sessions, closed beta' }));
+		const b = document.createElement('button');
+		b.type = 'button'; b.id = 'acct-btn';
+		b.append(icon(acct ? via : 'out'), who);
+		b.addEventListener('click', () => { closeNav(); this.open(); });
+		el.appendChild(b);
+		el.hidden = false;
+	},
+	/* Signing out drops this browser from the account on the relay too, then
+	   forgets everything here (device key, account key), so the next sign-in
+	   starts as a new device and may pick another account. */
+	async signOut() {
+		try { await relay.signIn(); if (relay.acct && relay.id) await relay.req('POST', '/v1/revoke', relay.id); } catch (e) {}
+		await kvClear();
+		Object.assign(relay, { token: '', id: '', acct: '', s: null, at: 0 });
+		if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
+		if (this.show) await this.show(false);
+		this.renderAcct();
+	},
+	async addDevice() {
+		const m = modal('add a device');
+		const say = (t) => { const n = document.createElement('div'); n.className = 'note'; n.textContent = t; m.body.appendChild(n); return n; };
+		const K = relay.acct && !REMOTE_ID ? await kvGet('k') : null;
+		if (K) {
+			const secret = hk.random(32), ctl = new AbortController();
+			const url = location.origin + location.pathname + '#pair=' + relay.id + '.' + hex(secret);
+			m.onclose = () => ctl.abort();
+			m.body.appendChild(groupLabel('a phone or another browser'));
+			say('scan this, or open the link on it, then sign in there. it works once, while this stays open.');
+			const q = qrSvg(url);
+			if (q) m.body.appendChild(q);
+			const link = Object.assign(document.createElement('input'), { value: url, readOnly: true, className: 'pairlink' });
+			link.addEventListener('focus', () => link.select());
+			m.body.appendChild(link);
+			const status = say('waiting for it\u2026');
+			pairHost(secret, K, ctl.signal).then(() => {
+				status.textContent = 'added. it holds your account key now.';
+				if (q) q.remove();
+				link.remove();
+			}, (e) => { if (!ctl.signal.aborted) { status.textContent = e.message; status.style.color = 'var(--err)'; } });
+			m.body.appendChild(groupLabel('a computer'));
+		} else if (relay.acct && REMOTE_ID) say('to add a phone or browser, open this from chat: a code session is using this page\u2019s connection.');
+		for (const t of ['on your computer, in the folder you want to reach: run hako, then :remote on.',
+		                 'the first time, it opens a page to link that computer to your account. after that, each folder you share shows up under code, one session each, until :remote off.',
+		                 'or a phone or browser from your computer: in hako there, run :remote pair and scan the code.']) say(t);
+		const b = document.createElement('button'); b.textContent = 'close'; b.addEventListener('click', m.close); m.foot.appendChild(b);
+	},
+	async open(linkTo, pairTo, switching) {
+		const title = linkTo ? 'link this computer' : pairTo ? 'add this device' : null;
+		const m = modal(title || 'account');
+		m.foot.style.flexWrap = 'wrap';
+		const say = (t, err, where) => { const n = document.createElement('div'); n.className = 'note'; if (err) n.style.color = 'var(--err)'; n.textContent = t; (where || m.body).appendChild(n); return n; };
 		const btn = (label, fn, where) => { const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', fn); (where || m.foot).appendChild(b); return b; };
-		const field = (ph, type) => { const i = document.createElement('input'); i.placeholder = ph; i.type = type || 'text'; i.autocapitalize = 'off'; i.spellcheck = false; m.body.appendChild(i); return i; };
-		const fail = (e) => say(e.message || String(e), true);
-		try { await relay.signIn(); } catch (e) { fail(e); return; }
-		const signedIn = async () => {
+		const field = (ph, type, where) => { const i = document.createElement('input'); i.placeholder = ph; i.type = type || 'text'; i.autocapitalize = 'off'; i.spellcheck = false; (where || m.body).appendChild(i); return i; };
+		const fail = (e) => say(e.name === 'NotAllowedError' ? 'no passkey for hako on this device, or it was cancelled' : e.message || String(e), true);
+		try { await relay.signIn(); await settleKey(); } catch (e) { fail(e); return; }
+		const signedIn = async (via) => {
+			if (via) await kvSet('via', via);
+			try { await settleKey(); } catch (e) {}
+			this.renderAcct();
+			if (this.show) this.show(!!REMOTE_ID || $('mode-code').classList.contains('on'));
 			m.body.textContent = ''; m.foot.textContent = '';
+			m.title.textContent = title || 'account';
 			$('modes').hidden = false;
 			if (linkTo) {
 				try { await linkComputer(linkTo[1], linkTo[2]); say('linked. its sessions now show under code on every device signed in to your account. you can close this tab.'); }
@@ -735,57 +1006,105 @@ window.hakoAccount = {
 				btn('done', m.close);
 				return;
 			}
-			if (!(await kvGet('k'))) say('signed in, but this browser does not hold your account key yet. sign in here with your passkey to unlock it.', true);
-			const list = await codeSessions();
-			if (!list.length) say('no open code sessions. in a terminal, run :remote on in hako to share that session here.');
+			if (pairTo) {
+				try { await pairDevice(pairTo[1], pairTo[2]); await settleKey(); say('added. this browser holds your account key now.'); }
+				catch (e) { fail(e); }
+			}
+			const v = await kvGet('via'), info = document.createElement('div');
+			info.className = 'acctinfo';
+			const who = document.createElement('div');
+			who.textContent = VIA[v] ? 'signed in with ' + VIA[v] : 'signed in';
+			who.appendChild(Object.assign(document.createElement('span'), { textContent: 'account ' + relay.acct.slice(0, 8) }));
+			info.append(icon(v || 'out'), who);
+			m.body.appendChild(info);
+			m.body.appendChild(groupLabel('code sessions'));
+			const hasK = !!(await kvGet('k')), list = await codeSessions();
+			if (!hasK) {
+				say('your code sessions are sealed with your account key, which this browser does not hold. to get it: on a device that has it, open add a device and scan its code (on a computer, :remote pair in hako), or use a passkey if you made one.');
+				btn('use a passkey', async () => { try { await passkeyLogin(); signedIn(); } catch (e) { fail(e); } }, m.body);
+			} else if (!list.length) say('none open. in a terminal, run :remote on in hako to share that folder here.');
 			for (const c of list) m.body.appendChild(optionRow(c.name, c.host + (c.dir ? ' \u00b7 ' + c.dir : ''), '', () => {
 				location.hash = '#remote=' + c.id; location.reload();
 			}, c.id === REMOTE_ID));
+			m.body.appendChild(optionRow('+ add a device', '', '', () => { m.close(); this.addDevice(); }));
+			btn('switch account', async () => { await this.signOut(); m.close(); this.open(null, null, true); });
+			btn('sign out', async () => { await this.signOut(); m.close(); });
 			const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
-			btn('sign out here', async () => { await kvClear(); relay.token = ''; relay.acct = ''; m.close(); });
 			btn('close', m.close);
 		};
-		if (relay.acct && (await kvGet('k'))) return signedIn();
-		const invited = INVITE || linkTo;
-		if (relay.acct) say('unlock your account on this browser:');
-		else {
-			say('code sessions are a closed beta. with an account, any browser you sign in to can drive hako on your computers, one session per folder, and every tool still asks you first.');
-			say('an account keeps only a random id, your passkey\u2019s public key, your account key locked by that passkey, and your devices\u2019 public keys and sealed names. never your chats, files, prompts or provider keys: those go between your own devices, encrypted end to end.');
-			if (!invited) say('without one, chat runs in this browser and keeps its history on this device.');
+		let needInvite = false;
+		if (ssoBack) {
+			const back = ssoBack;
+			ssoBack = null;
+			try { await ssoVerify(back); return signedIn(back.p); }
+			catch (e) { fail(e); if (e.invite) needInvite = back.p; }
 		}
-		const inv = field('invite code');
-		inv.value = INVITE;
+		/* linking a computer sends it K, so that one waits for a sign-in that unlocks it */
+		if (relay.acct && (!linkTo || (await kvGet('k')))) return signedIn();
+		m.title.textContent = title || (switching ? 'switch account' : 'sign in');
+		const invited = INVITE || linkTo || needInvite;
+		if (relay.acct) say('unlock your account on this browser:');
+		else if (!invited) say('code sessions are a closed beta. with an account, any browser you sign in to can drive hako on your computers, one session per folder, and every tool still asks you first.');
+		const box = document.createElement('div');
+		box.className = 'signin';
+		m.body.appendChild(box);
+		const inv = field('invite code', 'text', box);
+		inv.value = INVITE || (SSO_BACK && SSO_BACK.invite) || '';
 		inv.hidden = !invited;
-		btn('sign in with a passkey', async () => {
+		/* the relay is holding a sign-in that needs only the invite */
+		const offer = (p) => {
+			inv.hidden = false;
+			if (box.querySelector('.cont')) return;
+			const b = markBtn(p, 'continue with ' + VIA[p], async () => { try { await inviteFinish(inv.value); signedIn(p); } catch (e) { fail(e); } });
+			b.classList.add('cont');
+			inv.after(b);
+			inv.focus();
+		};
+		if (needInvite) offer(needInvite);
+		const health = (await relayHealth()).split(/\s+/);
+		for (const p of ['google', 'github']) if (health.includes(p))
+			box.appendChild(markBtn(p, 'sign in with ' + SSO_NAMES[p], async () => { try { await ssoStart(p, inv.value.trim(), switching); } catch (e) { fail(e); } }));
+		box.appendChild(markBtn('passkey', 'sign in with a passkey', async () => {
 			try {
 				let r = null;
 				try { r = await passkeyLogin(); } catch (e) { if (!inv.value.trim() || e.name !== 'NotAllowedError') throw e; }
 				if (!r) r = await passkeyCreate(inv.value.trim());
-				signedIn();
+				signedIn('passkey');
 			} catch (e) { fail(e); }
-		}, m.body);
-		if (!inv.hidden) btn(INVITE ? 'create your account' : 'new account (invite)', async () => { try { await passkeyCreate(inv.value.trim()); signedIn(); } catch (e) { fail(e); } }, m.body);
-		if (await relayMail()) {
-			const mail = field('or email', 'email');
-			const code = field('six-digit code');
+		}));
+		if (!inv.hidden) box.appendChild(markBtn('passkey', INVITE ? 'create your account with a passkey' : 'new account (invite) with a passkey',
+			async () => { try { await passkeyCreate(inv.value.trim()); signedIn('passkey'); } catch (e) { fail(e); } }));
+		if (health.includes('mail')) {
+			say('or', false, box).className = 'or';
+			const mail = field('email', 'email', box);
+			const code = field('six-digit code', 'text', box);
 			code.hidden = true;
-			const send = btn('email me a code', async () => {
+			const send = markBtn('email', 'email me a code', async () => {
 				try {
-					if (code.hidden) { await emailStart(mail.value); code.hidden = false; send.textContent = 'sign in'; say('sent. it works for ten minutes.'); return; }
+					if (code.hidden) { await emailStart(mail.value); code.hidden = false; send.lastChild.textContent = 'sign in'; say('sent. it works for ten minutes.'); return; }
 					await emailVerify(code.value, inv.value);
-					signedIn();
-				} catch (e) { fail(e); }
-			}, m.body);
+					signedIn('email');
+				} catch (e) { if (e.invite) offer('email'); fail(e); }
+			});
+			box.appendChild(send);
+		}
+		if (!relay.acct) {
+			const keeps = say('an account keeps only a random id, your passkey\u2019s public key (or a keyed hash of your email, GitHub or Google id, never the address or the name), your account key locked by that passkey, and your devices\u2019 public keys and sealed names. never your chats, files, prompts or provider keys: those go between your own devices, encrypted end to end.');
+			const pv = document.createElement('a'); pv.href = 'https://mithraeum.studio/privacy'; pv.target = '_blank'; pv.rel = 'noopener'; pv.textContent = 'privacy';
+			keeps.append(' ', pv);
+			if (!invited) say('without one, chat runs in this browser and keeps its history on this device.');
 		}
 		/* asking for access is an email from the person's own mail app: nothing is kept here */
 		if (!relay.acct && !invited) btn('request access', () => {
 			location.href = 'mailto:contact@mithraeum.studio?subject=' + encodeURIComponent('hako code access') +
 				'&body=' + encodeURIComponent('i would like to try code sessions in hako studio.');
 		});
+		const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
 		btn('close', m.close);
 	},
-	/* Nobody sees any of this until they are signed in, invited (#invite=),
-	   sent here by their computer (#link=, #signin) or in a session (#remote=). */
+	/* Hosted, the menu always offers chat · code and, at its foot, sign in (or
+	   who is signed in). New accounts still need an invite (#invite=); a computer
+	   sends people here with #link= or #signin, a session is #remote=. */
 	async boot() {
 		if (!HAKO_WASM_MODE) return;
 		/* chat is this browser's own agent; code is a session on one of your computers */
@@ -806,7 +1125,7 @@ window.hakoAccount = {
 			const list = await codeSessions(), el = $('project-list');
 			el.textContent = '';
 			for (const c of list) el.appendChild(row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }));
-			el.appendChild(row('+ add a device', '', '', () => { closeNav(); addDevice(); }));
+			el.appendChild(row('+ add a device', '', '', () => { closeNav(); this.addDevice(); }));
 			$('projects').hidden = false;
 		};
 		/* signed in, chat shows both, code sessions above this browser's chats; code shows
@@ -818,33 +1137,30 @@ window.hakoAccount = {
 			if (!(await kvGet('k'))) { $('projects').hidden = true; return; }
 			try { await relay.signIn(); await projects(); } catch (e) { $('projects').hidden = true; }
 		};
+		this.show = show;
 		$('mode-chat').addEventListener('click', () => {
 			if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
 			show(false);
 		});
-		const addDevice = () => {
-			const m = modal('add a device');
-			for (const t of ['on your computer, in the folder you want to reach: run hako, then :remote on.',
-			                 'the first time, it opens a page to link that computer to your account. after that, each folder you share shows up under code, one session each, until :remote off.']) {
-				const n = document.createElement('div'); n.className = 'note'; n.textContent = t; m.body.appendChild(n);
-			}
-			const b = document.createElement('button'); b.textContent = 'close'; b.addEventListener('click', m.close); m.foot.appendChild(b);
-		};
 		$('mode-code').addEventListener('click', async () => {
 			try { await relay.signIn(); } catch (e) { closeNav(); return this.open(); }
 			if (!relay.acct || !(await kvGet('k'))) { closeNav(); return this.open(); }
 			await show(true);
 		});
 		$('modes').hidden = false;
+		this.renderAcct();
+		if (await kvGet('acct')) relay.signIn().then(async () => { try { await settleKey(); } catch (e) {} this.renderAcct(); }, () => {});
 		/* a code session lives in its folder: no browsing to another one from here */
 		if (REMOTE_ID) $('btn-dir').hidden = true;
-		if (HASH === '#signin' || INVITE) { history.replaceState(null, '', location.pathname); this.open(); }
-		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|remote=)/.test(location.hash)) location.reload(); });
+		if (HASH === '#signin' || INVITE) history.replaceState(null, '', location.pathname);
+		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|pair=|remote=)/.test(location.hash)) location.reload(); });
 		window.addEventListener('hako-remote-lost', () => {
 			const m = modal('the connection dropped');
 			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => location.reload()); m.foot.appendChild(b);
 		});
 		if (LINK) this.open(LINK);
+		else if (PAIR) this.open(null, PAIR);
+		else if (SSO_BACK || HASH === '#signin' || INVITE) this.open();      /* one sheet, also back from GitHub or Google */
 		if (!REMOTE_ID) show(false);
 		if (REMOTE_ID) {
 			remote.ready.then(() => { projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
@@ -1891,7 +2207,7 @@ async function saveOut(path, name) {
    a person needs to know about this build, not something to discover when it
    disappears. */
 function browserNotice() {
-	if (!isWasm || settings.browser_notice || LINK) return;
+	if (!isWasm || settings.browser_notice || LINK || PAIR || INVITE || SSO_BACK || HASH === '#signin') return;
 	const m = modal('this runs in your browser');
 	const n = document.createElement('div');
 	n.className = 'note';
