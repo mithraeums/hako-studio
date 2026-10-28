@@ -57,10 +57,10 @@
 		overscroll-behavior: none;
 	}
 	/* Dynamic viewport unit, because a mobile browser's chrome resizes the window:
-	   100% leaves the composer under the URL bar. --vh is set from visualViewport
-	   for the keyboard case, which no CSS unit tracks. */
+	   100% leaves the composer under the URL bar. --vh and --vt are set from
+	   visualViewport for the keyboard case, which no CSS unit tracks. */
 	@supports (height: 100dvh) { html, body { height: 100dvh; } }
-	body { height: var(--vh, 100dvh); }
+	body { position: fixed; left: 0; right: 0; top: var(--vt, 0); height: var(--vh, 100dvh); }
 	button, .sess, .opt { touch-action: manipulation; }   /* no double-tap zoom */
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
@@ -213,6 +213,7 @@
 		padding-bottom: max(.6rem, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--line); background: var(--panel);
 	}
+	body.kb form { padding-bottom: .6rem; }   /* the keyboard covers the home bar, so no inset over it */
 	textarea {
 		flex: 1; resize: none; min-height: 2.6rem; max-height: 9rem; padding: .5rem .6rem;
 		font: inherit; color: var(--bone); background: var(--bg);
@@ -470,6 +471,12 @@ const relay = {
 		if (this.token && Date.now() - this.at < 600000) return Promise.resolve();
 		return this.signing || (this.signing = this.signInOnce().finally(() => { this.signing = null; }));
 	},
+	/* A reload keeps this tab's token (sessionStorage ends with the tab), so reopening
+	   a code session skips two trips to the relay. The device key in IndexedDB can
+	   mint a token anyway, so keeping one here exposes nothing new. */
+	kept() { try { return JSON.parse(sessionStorage.getItem('relay') || 'null'); } catch (e) { return null; } },
+	keep(v) { try { if (v) sessionStorage.setItem('relay', JSON.stringify(v)); else sessionStorage.removeItem('relay'); } catch (e) {} },
+	forget() { this.token = ''; this.at = 0; this.keep(null); },   /* a 401: the relay replaced it */
 	async signInOnce() {
 		await hk.load();
 		this.s = await kvGet('device');
@@ -477,6 +484,11 @@ const relay = {
 		hk.run('hkw_pub', this.s);
 		const o = hk.out(48);
 		this.pub = o.slice(0, 32);
+		const k = this.kept();
+		/* the account may have come after the token; a device bound from another one
+		   knows it only from the relay, so that one signs in */
+		const known = k && k.pub === hex(this.pub) && Date.now() - k.at < 600000 ? await kvGet('acct') : null;
+		if (known) { Object.assign(this, { token: k.token, id: k.id, acct: known, at: k.at }); return; }
 		this.token = '';
 		const c = await this.req('POST', '/v1/auth/challenge', hex(this.pub));
 		if (c.status !== 200) throw new Error('can\u2019t connect right now. try again in a moment');
@@ -486,6 +498,7 @@ const relay = {
 		if (p.status !== 200) throw new Error('sign-in didn\u2019t work, try again');
 		const [tok, id, acct] = p.text.split(' ');
 		this.token = tok; this.id = id; this.acct = acct === '-' ? '' : acct; this.at = Date.now();
+		this.keep({ pub: hex(this.pub), token: tok, id, at: this.at });
 	},
 	async send(to, frame) {
 		const r = await this.req('POST', '/v1/up', to + ' ' + b64(frame) + '\n');
@@ -773,13 +786,20 @@ if (REMOTE_ID) {
 	const enc = new TextEncoder(), dec = new TextDecoder();
 	const streams = new Map();
 	let nextSid = 1, ready = null, outq = [], sending = false;
+	let gen = 0, reader = null, heard = Date.now(), coming = false;
 
+	/* One upload at a time keeps the frames in order. Frames queued in the same
+	   moment (the handshake's last message and the first requests) wait a tick
+	   to go as one upload instead of one trip each. */
 	const flush = async () => {
 		if (sending) return;
 		sending = true;
+		await new Promise((r) => setTimeout(r, 0));
 		while (outq.length) {
 			const batch = outq.splice(0, 32).map((f) => REMOTE_ID + ' ' + b64(f) + '\n').join('');
-			try { await relay.req('POST', '/v1/up', batch); } catch (e) { break; }
+			let r;
+			try { r = await relay.req('POST', '/v1/up', batch); } catch (e) { break; }
+			if (r.status === 401) { relay.forget(); if (reader) reader.cancel().catch(() => {}); break; }   /* reconnects, signed in again */
 		}
 		sending = false;
 	};
@@ -806,14 +826,17 @@ if (REMOTE_ID) {
 
 	const down = async () => {
 		const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token } });
+		if (r.status === 401) relay.forget();   /* the next try signs in again */
 		if (!r.ok) throw new Error('can\u2019t connect right now');
-		const rd = r.body.getReader();
+		const rd = r.body.getReader(), mine = ++gen;
+		reader = rd; heard = Date.now();
 		let buf = '';
 		(async () => {
 			for (;;) {
 				let value, done;
 				try { ({ value, done } = await rd.read()); } catch (e) { break; }   /* a reload or a dropped network */
 				if (done) break;
+				heard = Date.now();
 				if (window.hakoDebug) hakoTrace('[remote] down', value.length);
 				buf += dec.decode(value, { stream: true });
 				let i;
@@ -823,29 +846,57 @@ if (REMOTE_ID) {
 					else if (line === '! offline ' + REMOTE_ID && hsWait) { const w = hsWait; hsWait = null; w(null); }
 				}
 			}
-			for (const st of streams.values()) st.end(true);
-			streams.clear();
-			window.dispatchEvent(new Event('hako-remote-lost'));
+			if (mine === gen) lost();
 		})();
 	};
 
+	const fatal = (m) => Object.assign(new Error(m), { fatal: true });
 	const connect = async () => {
 		if (window.hakoDebug) hakoTrace('[remote] connect');
 		await relay.signIn();
 		const K = await kvGet('k');
-		if (!relay.acct || !K) throw new Error('sign in on this device first');
-		await down();
-		await new Promise((r) => setTimeout(r, 150));
+		if (!relay.acct || !K) throw fatal('sign in on this device first');
+		await down();                          /* the relay lists the stream before it answers, so frames can go now */
 		hk.run('hkw_session', cat(relay.s, K));
 		const msg2 = new Promise((r) => { hsWait = r; setTimeout(() => { if (hsWait === r) { hsWait = null; r(null); } }, 8000); });
 		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
 		const m2 = await msg2;
 		if (!m2) throw new Error('that computer is not answering. is :remote on?');
-		if (hk.run('hkw_hs_read', m2, m2.length) < 0) throw new Error('that computer has a different account key');
+		if (hk.run('hkw_hs_read', m2, m2.length) < 0) throw fatal('that computer has a different account key');
 		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
 		if (!hk.ex.hkw_ready()) throw new Error('the session did not finish');
 	};
 	ready = connect();
+
+	/* The stream died (a network change, a phone waking up): connect again in
+	   the background, and every open EventSource reopens and replays. Only a
+	   key problem gives up; a computer that is asleep is retried. */
+	const lost = () => {
+		if (coming) return;
+		coming = true;
+		outq.length = 0;                       /* sealed for the old session */
+		ready = (async () => {
+			for (let wait = 300; ; wait = Math.min(wait * 2, 15000)) {
+				await new Promise((r) => setTimeout(r, wait));
+				while (document.hidden) await new Promise((r) => document.addEventListener('visibilitychange', r, { once: true }));
+				try { await connect(); coming = false; window.dispatchEvent(new Event('hako-remote-back')); return; }
+				catch (e) {
+					if (window.hakoDebug) hakoTrace('[remote] retry', e.message);
+					if (e.fatal) { coming = false; window.dispatchEvent(new CustomEvent('hako-remote-lost', { detail: e.message })); throw e; }
+					window.dispatchEvent(new CustomEvent('hako-remote-retry', { detail: e.message }));
+				}
+			}
+		})();
+		ready.catch(() => {});
+		for (const st of streams.values()) st.end(true);
+		streams.clear();
+	};
+	/* A phone back from sleep can hold a stream that died without a word: the
+	   relay writes every 25 s, so a longer silence means it is gone. */
+	const stale = () => { if (!coming && reader && !document.hidden && Date.now() - heard > 40000) reader.cancel().catch(() => {}); };
+	document.addEventListener('visibilitychange', stale);
+	window.addEventListener('online', stale);
+	setInterval(stale, 10000);
 
 	/* one HTTP exchange over a new stream; the reply ends when the computer closes it */
 	const open = async (head, body, onData, onEnd) => {
@@ -860,11 +911,18 @@ if (REMOTE_ID) {
 	const reqHead = (method, url, n) => method + ' ' + url + ' HTTP/1.1\r\nHost: relay\r\nContent-Type: text/plain\r\nContent-Length: ' + n + '\r\n\r\n';
 
 	const origFetch = window.fetch.bind(window);
+	const asking = new Map();   /* GETs on their way: the page asks for the same list from several places at once */
 	window.fetch = async (input, init) => {
 		const url = typeof input === 'string' ? input : input.url;
 		if (window.hakoDebug) hakoTrace('[remote] fetch', url);
 		if (!url.startsWith('/api/')) return origFetch(input, init);
 		const method = (init && init.method) || 'GET';
+		if (method !== 'GET') return carry(method, url, init);
+		let p = asking.get(url);
+		if (!p) { p = carry(method, url, init).finally(() => asking.delete(url)); asking.set(url, p); }
+		return (await p).clone();
+	};
+	const carry = async (method, url, init) => {
 		let body = init && init.body != null ? init.body : null;
 		body = body == null ? null : typeof body === 'string' ? enc.encode(body) : new Uint8Array(await new Response(body).arrayBuffer());
 		const parts = [];
@@ -884,20 +942,24 @@ if (REMOTE_ID) {
 	window.EventSource = class {
 		constructor(url) {
 			this.onopen = null; this.onmessage = null; this.onerror = null;
-			let buf = '', head = true;
-			const td = new TextDecoder();
-			open(reqHead('GET', url, 0), null, (d) => {
-				buf += td.decode(d, { stream: true });
-				if (head) { const i = buf.indexOf('\r\n\r\n'); if (i < 0) return; buf = buf.slice(i + 4); head = false; if (this.onopen) this.onopen(); }
-				let i;
-				while ((i = buf.indexOf('\n\n')) >= 0) {
-					const ev = buf.slice(0, i); buf = buf.slice(i + 2);
-					const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
-					if (data && this.onmessage) this.onmessage({ data });
-				}
-			}, () => { if (this.onerror) this.onerror(new Event('error')); }).catch(() => { if (this.onerror) this.onerror(new Event('error')); });
+			const fail = () => { if (this.onerror) this.onerror(new Event('error')); };
+			const start = () => {
+				let buf = '', head = true;
+				const td = new TextDecoder();
+				open(reqHead('GET', url, 0), null, (d) => {
+					buf += td.decode(d, { stream: true });
+					if (head) { const i = buf.indexOf('\r\n\r\n'); if (i < 0) return; buf = buf.slice(i + 4); head = false; if (this.onopen) this.onopen(); }
+					let i;
+					while ((i = buf.indexOf('\n\n')) >= 0) {
+						const ev = buf.slice(0, i); buf = buf.slice(i + 2);
+						const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+						if (data && this.onmessage) this.onmessage({ data });
+					}
+				}, (dropped) => { fail(); if (dropped && !this.closed) start(); }).catch(fail);   /* the reopen waits for the new session */
+			};
+			start();
 		}
-		close() {}
+		close() { this.closed = true; }
 	};
 	remote = { ready };
 }
@@ -951,6 +1013,7 @@ window.hakoAccount = {
 		try { await relay.signIn(); if (relay.acct && relay.id) await relay.req('POST', '/v1/revoke', relay.id); } catch (e) {}
 		await kvClear();
 		Object.assign(relay, { token: '', id: '', acct: '', s: null, at: 0 });
+		relay.keep(null);
 		if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
 		if (this.show) await this.show(false);
 		this.renderAcct();
@@ -1154,10 +1217,13 @@ window.hakoAccount = {
 		if (REMOTE_ID) $('btn-dir').hidden = true;
 		if (HASH === '#signin' || INVITE) history.replaceState(null, '', location.pathname);
 		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|pair=|remote=)/.test(location.hash)) location.reload(); });
-		window.addEventListener('hako-remote-lost', () => {
+		window.addEventListener('hako-remote-lost', (e) => {
 			const m = modal('the connection dropped');
+			const n = document.createElement('div'); n.className = 'note'; n.textContent = e.detail || ''; m.body.appendChild(n);
 			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => location.reload()); m.foot.appendChild(b);
 		});
+		window.addEventListener('hako-remote-retry', (e) => { meta.textContent = 'reconnecting: ' + e.detail; });
+		window.addEventListener('hako-remote-back', () => refreshState());
 		if (LINK) this.open(LINK);
 		else if (PAIR) this.open(null, PAIR);
 		else if (SSO_BACK || HASH === '#signin' || INVITE) this.open();      /* one sheet, also back from GitHub or Google */
@@ -2151,8 +2217,9 @@ function renderTray() {
 		chip.className = 'chip';
 		const nm = document.createElement('span');
 		nm.className = 'nm';
-		nm.textContent = (a.file ? '↑ ' : '') + a.name.split('/').pop();
-		nm.title = a.file ? a.name + ' — uploads when you send' : a.name;
+		const img = a.file && isImage(a.file) && caps.has('image');
+		nm.textContent = (img ? '▣ ' : a.file ? '↑ ' : '') + a.name.split('/').pop();
+		nm.title = img ? a.name + ' — the model sees it with your message' : a.file ? a.name + ' — uploads when you send' : a.name;
 		const rm = document.createElement('button');
 		rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×';
 		rm.title = 'remove';
@@ -2167,11 +2234,36 @@ function attach(name, file) {
 	input.focus();
 }
 
-/* Upload anything picked off the device, then hand back every path to mention. */
+const isImage = (f) => /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|heic)$/i.test(f.name);
+/* A phone photo is 3 to 12 MB; providers scale anything past 1568 px down anyway. */
+async function shrinkImage(file) {
+	if (file.size < 1.5e6 && /^image\/(png|jpeg|gif|webp)$/.test(file.type)) return file;
+	const bmp = await createImageBitmap(file);
+	const s = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+	const c = document.createElement('canvas');
+	c.width = Math.max(1, Math.round(bmp.width * s));
+	c.height = Math.max(1, Math.round(bmp.height * s));
+	c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+	if (bmp.close) bmp.close();
+	return new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error('could not shrink it'))), 'image/jpeg', 0.85));
+}
+
+/* Upload anything picked off the device, then hand back every path to mention
+   and every [image #N] the core gave an image. */
 async function flushAttachments() {
-	const paths = [];
+	const paths = [], marks = [];
 	for (const a of attached) {
 		if (!a.file) { paths.push(a.name); continue; }
+		if (isImage(a.file)) {
+			if (!caps.has('image')) { add('turn error', '', a.name + ': images reach the agent in a code session or hako --serve, not this browser’s own agent yet'); continue; }
+			try {
+				const r = await fetch('/api/image', { method: 'POST', body: await shrinkImage(a.file) });
+				const j = await r.json();
+				if (j.ok) marks.push(j.marker);
+				else add('turn error', '', a.name + ' not attached: ' + (j.error || 'no answer'));
+			} catch (e) { add('turn error', '', a.name + ' not attached: ' + e.message); }
+			continue;
+		}
 		if (!caps.has('upload')) { add('turn error', '', 'this agent cannot accept uploads'); continue; }
 		add('turn system', '', 'sending ' + a.name + ' (' + fmtSize(a.file.size) + ') …');
 		try {
@@ -2183,7 +2275,7 @@ async function flushAttachments() {
 	}
 	attached.length = 0;
 	renderTray();
-	return paths;
+	return { paths, marks };
 }
 
 /* A file the agent wrote is only useful if it can leave. The browser's download
@@ -2877,11 +2969,13 @@ async function loadFiles() {
 /* ---------- event stream ---------- */
 /* Everything the ring replays on connect describes the past. Live events start
    after a short settle, so a stale prompt cannot pop a box that is already dealt with. */
-let replaying = true;
-setTimeout(() => { replaying = false; }, 1200);
+let replaying = true, settleTimer = setTimeout(() => { replaying = false; }, 1200);
 
 const es = new EventSource('/api/events');
-es.onopen = () => { dot.classList.add('on'); clearLog(); renderMeta(); };
+es.onopen = () => {                   /* also after a remote reconnect: the ring replays again */
+	dot.classList.add('on'); clearLog(); renderMeta();
+	replaying = true; clearTimeout(settleTimer); settleTimer = setTimeout(() => { replaying = false; }, 1200);
+};
 es.onerror = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
 es.onmessage = (ev) => {
 	let m;
@@ -2964,7 +3058,7 @@ form.addEventListener('submit', (e) => {
 	e.preventDefault();
 	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
-	if (!text) return;
+	if (!text && !attached.length) return;
 	input.value = ''; input.style.height = 'auto';
 
 	if (UNSAFE.test(text)) {
@@ -2978,8 +3072,10 @@ form.addEventListener('submit', (e) => {
 	}
 	setBusy(true);
 	if (attached.length && !text.startsWith(':') && !text.startsWith('/')) {
-		flushAttachments().then((paths) => {
-			post('/api/prompt', paths.length ? text + '\n\nfiles: ' + paths.join(' ') : text);
+		flushAttachments().then(({ paths, marks }) => {
+			const words = [text, marks.join(' ')].filter(Boolean).join(' ');
+			if (!words && !paths.length) { setBusy(false); return; }
+			post('/api/prompt', paths.length ? words + '\n\nfiles: ' + paths.join(' ') : words);
 		});
 		return;
 	}
@@ -3022,6 +3118,21 @@ devicePicker.addEventListener('change', () => {
 });
 document.body.appendChild(devicePicker);
 $('attach').addEventListener('click', () => devicePicker.click());
+/* A pasted screenshot or a dropped file lands on the tray like a picked one.
+   Pasted images are all called image.png, so each gets its own name. */
+input.addEventListener('paste', (e) => {
+	const files = Array.from((e.clipboardData && e.clipboardData.files) || []).filter(isImage);
+	if (!files.length) return;
+	e.preventDefault();
+	files.forEach((f, i) => attach('pasted-' + Date.now().toString(36) + (i ? '-' + i : '') + '.' + (f.type.split('/')[1] || 'png'), f));
+});
+document.addEventListener('dragover', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+	const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+	if (!files.length) return;
+	e.preventDefault();
+	files.forEach((f) => attach(f.name, f));
+});
 $('btn-settings').addEventListener('click', () => { closeNav(); openSettings(); });
 $('btn-new').addEventListener('click', () => {
 	closeNav(); clearLog(); post('/api/slash', ':session new'); post('/api/reset', '');
@@ -3039,20 +3150,27 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav()
 
 /* The on-screen keyboard shrinks the window without changing any CSS viewport
    unit, so the composer ends up underneath it. visualViewport reports the real
-   visible box. A home-screen app on iOS reports 100dvh and innerHeight a status
-   bar short while drawing under it, so there the screen is the height. */
+   visible box. iOS also pans that box down by about the keyboard's height to
+   show the field, so the page sits at the box's offset, not at the top: sized
+   alone, the composer landed at the top with blank space under it. A home-screen
+   app on iOS reports 100dvh and innerHeight a status bar short while drawing
+   under it, so there the screen is the height. */
 if (window.visualViewport) {
 	const vv = window.visualViewport;
 	const full = () => navigator.standalone
 		? (matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height))
 		: window.innerHeight;
+	const isOpen = () => vv.height < window.innerHeight - 80;
+	const pan = () => document.documentElement.style.setProperty('--vt', (isOpen() ? vv.offsetTop : 0) + 'px');
 	const sync = () => {
-		const open = vv.height < window.innerHeight - 80;
+		const open = isOpen();
 		document.documentElement.style.setProperty('--vh', (open ? vv.height : full()) + 'px');
+		pan();
 		document.body.classList.toggle('kb', open);
 		if (open) log.scrollTop = log.scrollHeight;
 	};
 	vv.addEventListener('resize', sync);
+	vv.addEventListener('scroll', pan);
 	window.addEventListener('resize', sync);
 	sync();
 }

@@ -8,7 +8,7 @@ computer, and runs a turn on it through the relay. Fake engine, no network.
 
 Needs playwright + chromium, a built ../hako-code/hako, relay/relay and a
 `make site RELAY_URL=http://127.0.0.1:18793` dist (make remote-test does both)."""
-import os, re, sys, time, pty, fcntl, termios, struct, select, signal, subprocess, tempfile
+import glob, os, re, sys, time, pty, fcntl, termios, struct, select, signal, subprocess, tempfile
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
@@ -212,6 +212,8 @@ with sync_playwright() as p:
     ck(until(rb"interrupted", 5) is not None, "desktop: the turn was interrupted")
     pg.reload(); pg.wait_for_timeout(4000)
     ck(pg.inner_text('#send').strip() == 'send' and not pg.locator('.thinking').count(), "page: after a reload, not stuck thinking")
+    ck(not pg.evaluate("performance.getEntriesByType('resource').some((e) => e.name.includes('/v1/auth/'))"),
+       "page: a reload keeps this tab's sign-in, no trip to sign in again")
     pg.fill('#input', ':auto'); pg.click('#send')
     pg.wait_for_timeout(2000)
     ck("not from a remote device" in pg.inner_text('#log'), "page: :auto is refused from a remote device")
@@ -261,6 +263,7 @@ with sync_playwright() as p:
     said = seen.count(b"a device on your account connected")
     wp.reload(); wp.wait_for_timeout(4000)
     ck(wp.inner_text('#send').strip() == 'stop', "webkit: a reload mid-turn still offers stop")
+    ck("SLOW from safari" in wp.inner_text('#log'), "webkit: a reload brings the transcript back")
     kids = ",".join(subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split())
     held = subprocess.run(["lsof", "-nP", "-a", "-p", kids, "-iTCP", "-sTCP:LISTEN"], capture_output=True, text=True).stdout if kids else ""
     ck(not held.strip(), "desktop: the curls hako starts do not inherit its listening socket")
@@ -283,7 +286,7 @@ with sync_playwright() as p:
         const req = relay.req;
         let asked = 0;
         relay.req = (m, path, body) => { if (path === '/v1/auth/challenge') asked++; return req.call(relay, m, path, body); };
-        relay.token = '';
+        relay.forget();
         try { await Promise.all([relay.signIn(), relay.signIn(), relay.signIn()]); }
         catch (e) { return [e.message]; } finally { relay.req = req; }
         const r = await relay.req('POST', '/v1/webauthn/challenge');
@@ -420,6 +423,7 @@ with sync_playwright() as p:
     # the computer's upload dies while its download lives (the relay still lists it online):
     # hako must notice on the next keepalive and reconnect, or every reply vanishes
     ups = subprocess.run(["pgrep", "-P", str(pid), "-f", "/v1/up"], capture_output=True, text=True).stdout.split()
+    told = seen.count(b"a device on your account connected")
     for u in ups: os.kill(int(u), signal.SIGKILL)
     pg.wait_for_timeout(32000)
     pg.locator('#project-list button:has-text("proj")').click(); pg.wait_for_timeout(3000)
@@ -430,8 +434,61 @@ with sync_playwright() as p:
     try:
         pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % turns, timeout=20000)
         ck(len(ups) == 1 and len(ups2) == 1 and ups2 != ups, "desktop: a dead upload reconnects, and the session answers again")
+        ck(seen.count(b"a device on your account connected") == told,
+           "desktop: a device it already announced reconnects quietly after its own relay link dropped")
     except Exception as e:
         ck(False, "desktop: a dead upload reconnects, and the session answers again (%s %s %s)" % (ups, ups2, str(e)[:50]))
+    # the page's own stream dies (a network change, a phone waking up): another stream for the
+    # same device takes its place at the relay, then goes away. The page must come back by itself
+    pg.evaluate("""(() => { const c = new AbortController();
+        fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token }, signal: c.signal })
+            .then(() => setTimeout(() => c.abort(), 300), () => {}); })()""")
+    pg.wait_for_timeout(7000)
+    ck(pg.locator('.modal').count() == 0 and "hey after the upload died" in pg.inner_text('#log'),
+       "page: a dropped connection comes back by itself, transcript and all, no dialog")
+    turns = pg.locator('.turn.model').count()
+    try:
+        pg.fill('#input', 'hey after the drop'); pg.click('#send', timeout=5000)
+        pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % turns, timeout=20000)
+        ck(True, "page: after coming back, a turn answers")
+    except Exception as e:
+        ck(False, "page: after coming back, a turn answers (%s)" % str(e)[:60])
+    # the relay replaced the page's token (this device signed in somewhere else): the stream
+    # drops, the reconnect gets a 401, signs in again and comes back
+    emark = len(errs)
+    stale = pg.evaluate("""(async () => { const old = relay.token, at = relay.at;
+        relay.forget(); await relay.signIn(); const fresh = relay.token;
+        Object.assign(relay, { token: old, at }); relay.keep(Object.assign(relay.kept(), { token: old }));
+        const c = new AbortController();
+        fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + fresh }, signal: c.signal })
+            .then(() => setTimeout(() => c.abort(), 300), () => {});
+        return old; })()""")
+    pg.wait_for_timeout(8000)
+    errs[emark:] = [e for e in errs[emark:] if "status of 401" not in e]   # the browser logs the 401 it was meant to get
+    turns = pg.locator('.turn.model').count()
+    try:
+        pg.fill('#input', 'hey with a new token'); pg.click('#send', timeout=5000)
+        pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % turns, timeout=20000)
+        ck(pg.evaluate("relay.token") != stale and pg.locator('.modal').count() == 0,
+           "page: a token the relay replaced is dropped on the 401, signed in again, and the session answers")
+    except Exception as e:
+        ck(False, "page: a token the relay replaced is dropped on the 401, signed in again, and the session answers (%s)" % str(e)[:60])
+    # an image pasted on the phone crosses the relay sealed and lands in the desk's images dir;
+    # 600 KB of noise, so it spans many frames
+    pg.evaluate("""(() => { const n = 600000, b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 2654435761) >>> 24;
+        b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        const dt = new DataTransfer(); dt.items.add(new File([b], 'image.png', { type: 'image/png' }));
+        $('input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); })()""")
+    turns = pg.locator('.turn.model').count()
+    try: pg.wait_for_function("$('send').textContent.trim() === 'send'", timeout=15000)
+    except Exception: pass
+    pg.fill('#input', 'see this'); pg.click('#send')
+    try: pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % turns, timeout=30000)
+    except Exception: pass
+    imgs = glob.glob(HOME + "/.hako/projects/*/images/*.png")
+    ck("see this [image #1]" in pg.inner_text('#log') and any(os.path.getsize(i) == 600000 for i in imgs),
+       "page: a pasted image crosses the relay whole and the message names it (%s | tray %r | %r)"
+       % ([os.path.getsize(i) for i in imgs], pg.inner_text('#tray'), pg.inner_text('#log')[-160:]))
     ck(not errs, "page: no JS errors %s" % errs[:2])
     b.close()
 
