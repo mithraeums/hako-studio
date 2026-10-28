@@ -47,10 +47,24 @@ with sync_playwright() as p:
         pg = b.new_page(viewport=vp)
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
         pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+        if name == "phone":   # a stand-in visualViewport, so the test can open "the keyboard" the way iOS does
+            pg.add_init_script("""window.__vv = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, offsetLeft: 0, scale: 1 });
+                Object.defineProperty(window, 'visualViewport', { get: () => window.__vv, configurable: true });""")
         pg.goto(U); pg.wait_for_timeout(1500)
         ck(not errs, f"[{name}] page loads with no JS errors {errs[:2]}")
         ck(pg.evaluate("document.documentElement.scrollWidth") <= vp['width'], f"[{name}] no sideways scroll")
         if name == "phone":
+            # the keyboard opens: iOS shrinks the visible box to 420 and pans it 360 down to show the field
+            box = lambda: pg.evaluate("""(() => { const b = document.body.getBoundingClientRect(), f = $('form').getBoundingClientRect();
+                return [Math.round(b.top), Math.round(b.bottom), Math.round(f.bottom)]; })()""")
+            pg.evaluate("__vv.height = 420; __vv.offsetTop = 360; __vv.dispatchEvent(new Event('resize')); __vv.dispatchEvent(new Event('scroll'))")
+            pg.wait_for_timeout(200); kb = box()
+            ck(kb[0] == 360 and kb[1] == 780 and kb[2] >= 760,
+               f"[phone] with the keyboard open the page fills the visible box, composer at its foot over the keyboard (body {kb[0]}-{kb[1]}, form ends {kb[2]})")
+            pg.evaluate("__vv.height = 844; __vv.offsetTop = 0; __vv.dispatchEvent(new Event('resize'))")
+            pg.wait_for_timeout(200); shut = box()
+            ck(shut[0] == 0 and shut[1] == 844 and shut[2] >= 824, f"[phone] closing it puts the composer back at the bottom (body {shut[0]}-{shut[1]}, form ends {shut[2]})")
+            ck(not errs, f"[phone] no JS errors {errs[:2]}")
             pg.close(); continue
         ck("alpha.txt" in pg.inner_text('#files'), "the side panel lists the project's files")
         pg.click('#btn-dir'); pg.wait_for_timeout(1000)
@@ -103,6 +117,18 @@ with sync_playwright() as p:
            "closing settings says the theme in the status line, nothing in the chat")
         sess = os.popen(f"cat {HOME}/.hako/projects/*/sessions/*.jsonl 2>/dev/null").read()
         ck("theme:" not in sess, "and nothing about the theme in the session log")
+        # a pasted screenshot: a chip on the tray, then [image #N] in the message and the bytes in hako's images dir
+        pg.evaluate("""(() => { const px = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+            const dt = new DataTransfer(); dt.items.add(new File([Uint8Array.from(px, (c) => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+            $('input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); })()""")
+        pg.wait_for_timeout(300)
+        ck("▣ pasted-" in pg.inner_text('#tray'), "a pasted image shows as an image chip on the tray")
+        pg.fill('#input', 'what is this'); pg.click('#send'); pg.wait_for_timeout(2500)
+        imgs = os.popen(f"ls {HOME}/.hako/projects/*/images/ 2>/dev/null").read().split()
+        ck("what is this [image #1]" in pg.inner_text('#log') and any(i.endswith("-1.png") for i in imgs) and not pg.inner_text('#tray').strip(),
+           "sending it gives the message [image #1], keeps the png in hako's images dir, and clears the tray (%s)" % imgs)
+        ck(not os.path.exists(PROJ + "/image.png") and not any(f.startswith("pasted-") for f in os.listdir(PROJ)),
+           "and puts nothing in the project folder")
         ck(not errs, f"no JS errors through the whole session {errs[:2]}")
     b.close()
 srv.kill()

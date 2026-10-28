@@ -6,6 +6,19 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
+## [v0.0.9] - 2026-10-28
+
+### added
+- **images**: paste a screenshot, drop a file or pick a photo with +, and it waits on the tray as a ▣ chip. send, and the model sees it with your message as `[image #1]`. a phone photo is shrunk to 1568 px on the device first, so a code session sends hundreds of KB through the relay, not 10 MB. needs a hako with the `image` capability; the browser's own agent cannot take images yet and says so
+- a message can be only an image, no words needed
+
+### fixed
+- a code session whose connection dropped (a network change, a phone back from sleep) stopped with "the connection dropped" and a reconnect button that reloaded the page. it now reconnects by itself, says "reconnecting" in the status line while it tries, and the transcript comes back with it. only a key problem still stops with a dialog
+- a phone back from sleep could sit on a connection that had died without a word, looking connected but hearing nothing until the next message went out. more than 40 seconds of silence (the relay writes every 25) now counts as dropped
+- opening a code session (a reload, a phone coming back) took about ten trips to the relay one after another; it takes five now, about half the wait at a phone's usual 100 ms round trip (measured: 1.0 s → 0.56 s). a reload keeps this tab's sign-in instead of signing in again, the page no longer waits a fixed 150 ms before the handshake, requests made in the same moment go up together, and the same list asked for from several places at once is fetched once
+- a reconnect holding a token the relay had replaced (this device signed in again somewhere) kept failing for up to ten minutes; the 401 now drops it and signs in again
+- on an iPhone, opening the keyboard threw the input bar up to the top of the screen with blank space under it. iOS slides the visible part of the page down to show the field, and the page shrank to fit the keyboard but stayed at the top. it now follows the slide, so the bar sits right on the keyboard
+
 ## [v0.0.8] - 2026-10-27
 
 ### added
