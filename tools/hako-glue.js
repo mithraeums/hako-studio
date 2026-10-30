@@ -256,6 +256,7 @@ export function parseHeaders(raw) {
 // memory once, served synchronously, and changed files written back per turn.
 export async function dirStorage(handle) {
 	const files = new Map();          // "/Notes/todo.md" -> contents
+	const times = new Map();          // same key -> last modified, seconds (for "recent files")
 	const dirs = new Set(['/']);
 	const dirty = new Set();
 	const gone = new Set();
@@ -278,6 +279,7 @@ export async function dirStorage(handle) {
 					const text = await f.text();
 					if (text.indexOf('\u0000') >= 0) continue;   /* binary */
 					files.set(p, text);
+					times.set(p, Math.floor(f.lastModified / 1000));
 				} catch { /* unreadable: treat as absent */ }
 			}
 		}
@@ -296,6 +298,7 @@ export async function dirStorage(handle) {
 		write(p, data, append) {
 			const k = key(p);
 			files.set(k, append && files.has(k) ? files.get(k) + data : data);
+			times.set(k, Math.floor(Date.now() / 1000));
 			dirty.add(k);
 			gone.delete(k);
 			return true;
@@ -316,7 +319,8 @@ export async function dirStorage(handle) {
 			const k = key(prefix) === '/' ? '' : key(prefix);
 			return [...dirs].filter((d) => d.startsWith(k + '/'));
 		},
-		remove(p) { const k = key(p); files.delete(k); dirty.delete(k); dirs.delete(k); gone.add(k); return true; },
+		remove(p) { const k = key(p); files.delete(k); times.delete(k); dirty.delete(k); dirs.delete(k); gone.add(k); return true; },
+		mtime: (p) => times.get(key(p)) || 0,
 
 		async flush() {
 			for (const d of dirs) {
@@ -393,6 +397,7 @@ export function mountedStorage(device, mount, mountAt) {
 		stat: (p) => { const { s, rel } = pick(p); return s.stat(rel); },
 		mkdirp: (p) => { const { s, rel } = pick(p); return s.mkdirp(rel); },
 		remove: (p) => { const { s, rel } = pick(p); return s.remove(rel); },
+		mtime: (p) => { const { s, rel } = pick(p); return s.mtime ? s.mtime(rel) : 0; },
 		list(prefix) {
 			const { s, rel } = pick(prefix);
 			const out = s.list(rel);
@@ -417,6 +422,7 @@ export function mountedStorage(device, mount, mountAt) {
 export async function opfsStorage() {
 	const root = await navigator.storage.getDirectory();
 	const files = new Map();          // "/hako/.hakorc" -> contents
+	const times = new Map();          // same key -> last modified, seconds (for "recent files")
 	const dirs = new Set(['/']);
 	const dirty = new Set();
 	const gone = new Set();
@@ -436,6 +442,7 @@ export async function opfsStorage() {
 					const f = await handle.getFile();
 					if (f.size > MAX_MIRROR) continue;
 					files.set(p, await f.text());
+					times.set(p, Math.floor(f.lastModified / 1000));
 				} catch { /* locked or unreadable: treat as absent */ }
 			}
 		}
@@ -469,6 +476,7 @@ export async function opfsStorage() {
 		write(p, data, append) {
 			const k = key(p);
 			files.set(k, append && files.has(k) ? files.get(k) + data : data);
+			times.set(k, Math.floor(Date.now() / 1000));
 			dirty.add(k);
 			gone.delete(k);
 			return true;
@@ -489,7 +497,8 @@ export async function opfsStorage() {
 			const k = key(prefix) === '/' ? '' : key(prefix);
 			return [...dirs].filter((d) => d !== '/' && d.startsWith(k + '/'));
 		},
-		remove(p) { const k = key(p); files.delete(k); dirty.delete(k); dirs.delete(k); gone.add(k); return true; },
+		remove(p) { const k = key(p); files.delete(k); times.delete(k); dirty.delete(k); dirs.delete(k); gone.add(k); return true; },
+		mtime: (p) => times.get(key(p)) || 0,
 
 		async flush() {
 			for (const k of dirty) {

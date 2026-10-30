@@ -1,6 +1,9 @@
 <p align="center">
   <a href="https://mithraeums.github.io">
-    <img src="https://mithraeums.github.io/assets/banner-hako-studio.png" alt="hako studio — the agent in a browser, for every device you own" width="100%"/>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://mithraeums.github.io/assets/banner-hako-studio-night.png"/>
+      <img src="https://mithraeums.github.io/assets/banner-hako-studio.png" alt="hako studio — the agent in a browser, for every device you own" width="100%"/>
+    </picture>
   </a>
 </p>
 
@@ -9,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.0.9-e2402e?style=flat-square&labelColor=14130f" alt="v0.0.9"/>
+  <img src="https://img.shields.io/badge/version-v0.1.0-e2402e?style=flat-square&labelColor=14130f" alt="v0.1.0"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -21,28 +24,40 @@
 
 <br>
 
-<!-- Recordings are made locally in recordings/ (gitignored) and published to the
-     website repo, same as the other repos: assets/readme-screenshots/hako-studio/ -->
+<!-- studio media: the real page served by hako --serve, answering with hako-sho (Code/mithraeums/.claude/web/look/studio.py).
+     paper (washi) by day, night (mithraeum) in dark mode; width only, never a height, so GitHub never stretches them -->
 <p align="center">
-  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-demo.gif?raw=true" alt="hako studio editing a project" width="86%"/>
+  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/turn.gif?raw=true" alt="hako studio in a code session (hako --serve): a question about main.c, the read_file tool asking first, then the answer" width="100%"/>
 </p>
 
-<table align="center">
-  <tr>
-    <td align="center" width="33%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-desktop.png?raw=true" alt="a session with tool calls" width="100%"/><br/>
-      <sub>tool calls as chips · files and sessions per folder</sub>
-    </td>
-    <td align="center" width="33%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-themes.gif?raw=true" alt="switching themes" width="100%"/><br/>
-      <sub><code>:theme</code> · the suite's 19 palettes, live</sub>
-    </td>
-    <td align="center" width="33%">
-      <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/studio-settings.png?raw=true" alt="settings panel" width="100%"/><br/>
-      <sub>settings · and a plain answer on where your data lives</sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/landing-night.png?raw=true"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/landing.png?raw=true" alt="the chat landing in the browser: the HAKO wordmark, a greeting for the time of day and the composer" width="100%"/>
+  </picture><br/>
+  <sub><b>chat</b>, the agent in your browser (HAKO): an empty chat is a landing, a greeting and the composer</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/chat-night.png?raw=true"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/chat.png?raw=true" alt="a finished turn: the tool chip and the answer in markdown" width="100%"/>
+  </picture><br/>
+  <sub><b>code</b>, a session on your computer (CODE): tool calls as chips, replies in markdown</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/settings-night.png?raw=true"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/settings.png?raw=true" alt="settings: themes, voice and where your data lives" width="100%"/>
+  </picture><br/>
+  <sub>settings, and a plain answer on where your data lives</sub>
+</p>
+
+<p align="center">
+  <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/phone.png?raw=true" alt="hako studio on a phone, in washi and in mithraeum" width="100%"/><br/>
+  <sub>on a phone: washi and mithraeum</sub>
+</p>
 
 <table>
   <tr>
@@ -93,10 +108,13 @@
   or any folder you add (symlinked into place — never copied, never moved), and `:pull` for the
   rest. Cloud catalogs come from the provider. The browser build lists only what a page can
   reach, so local models and OAuth providers are hidden there rather than offered and broken.
-- **19 themes — the same list as hake and hako, `washi` by default — and a thinking indicator** with elapsed time.
-  Both persist on your device.
+- **Themes from the one rc.** `terminal` by default (a plain palette that follows your system's
+  light or dark), plus the suite's 19 and any custom theme in `~/.hakorc`. With `hako --serve`
+  the page reads the rc; `studio.theme=` gives the page its own.
+- **Read aloud.** A speaker on every reply, or `:voice on` to hear each one. Only the device's own
+  voices are used, so the text never leaves it.
 - **Your code sessions, from anywhere** *(invite beta)*. Run `:remote on` in a terminal hako
-  and sign in at hako.mithraeum.studio on any device: ☰ → code lists the sessions running on
+  and sign in at hako.mithraeum.studio on any device: the code view lists the sessions running on
   your computers, one per shared folder, and opening one turns the page into that session.
   Every byte is sealed in the tab (Noise, by `hako.wasm`) and opened only by your computer; the
   relay in between routes ciphertext and keeps no chats. Details below.
@@ -265,13 +283,13 @@ then answers `503` and says which of the two to use.
 
 | Area | What it does |
 |---|---|
-| **☰ chat · code** | chat is this browser's own agent; code lists your code sessions (signed in only) and returns to the last one |
-| **sidebar** | working directory · `open folder…` · settings · sessions in this folder · new session · reload |
-| **session row** | click to resume with full transcript; `✎` renames it; `×` deletes the stored jsonl |
-| **approval box** | `allow once` · `deny` · `always` — answered boxes stay settled across a reload |
-| **header** | live provider/model and turn count, read from the agent's own output |
-| **files** | browse the machine's folders and files; tap a file to put its name in your message; **add from device** uploads from the phone's Files/Photos into the open project |
-| **settings** | theme · thinking indicator · extra folders to search for model weights · forget local settings |
+| **menu** | HAKO or CODE at the top with the chat/code switch; new, search, files, settings; your recent sessions; the account row at the foot. Fold it away with the button or cmd/ctrl+b; it remembers |
+| **landing** | a greeting for the time of day, the composer under it and the newest files in the folder; the composer moves down once the chat starts. Code shows your code sessions to pick from |
+| **composer** | type `:` or `/` for the command menu (↑↓, tab, enter; esc closes only the menu). Chips under it show the folder, the model and the mode |
+| **session row** | open it with its whole transcript; `✎` renames it (a code session's name reaches the terminal too); `×` deletes it |
+| **approval box** | `allow once` · `deny` · `always`; answered boxes stay settled across a reload |
+| **files** | browse folders and files; tap one to put it in your message; **add from device** uploads from the phone's Files/Photos into the open project |
+| **settings** | theme · read aloud · thinking indicator · extra folders to search for model weights · forget local settings |
 
 Uploads land in the open project under a sanitized basename, never overwrite (collisions become
 `-1`, `-2`), cap at 128 MB, stream to disk, and announce themselves in the transcript so the agent
@@ -280,12 +298,12 @@ knows the file arrived. Add the page to your home screen and it runs chromeless 
 `:login` and friends need a terminal — over `--serve` they answer "run this in the shell" rather
 than parking the agent on a stdin nobody can reach.
 
-Type `:` commands exactly as in the CLI — `:trust`, `:usage`, `:sessions`, `:pull <model>`,
-`:help`. Bare `:model`, `:provider` and `:theme` open the page's own pickers; `:sessions` and
+Commands are the CLI's: `:` runs hako itself (`:trust`, `:usage`, `:sessions`, `:pull <model>`,
+`:help`) and `/` drives the model (`/compact`, `/retry`, every skill as `/<skill>`). Bare `:model`, `:provider` and `:theme` open the page's own pickers; `:sessions` and
 the model's own questions arrive as a choice box — tap an option and the agent carries on.
 
 On a desktop Enter sends and Shift+Enter adds a line; on a touch device Enter is a newline and
-`send` sends. While a turn is running that button becomes `stop`. Under 720px the sidebar is a
+`send` sends. While a turn is running that button becomes `stop`. Under 720px the menu is a
 drawer, and the UI asks the agent what it supports before offering it — an older `hako` simply
 shows fewer buttons.
 
@@ -301,7 +319,7 @@ Running from the binary, on that machine's disk:
   <id>.title                               optional name you gave it (sidecar)
 ~/.hako/credentials                        provider keys and OAuth tokens
 ~/.hako/models/<id>/<id>.mlf2              local weights
-browser localStorage                       theme, spinner, model search paths
+browser localStorage                       theme, spinner, model search paths, menu folded
 browser IndexedDB (hako-account)           when signed in: this device's key and your account key
 ```
 

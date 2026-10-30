@@ -19,8 +19,10 @@ const mkEl = (id) => ({
 	insertBefore(c){ this.children.push(c); return c; }, remove(){},
 	addEventListener(ev, fn){ listeners.set(id + ':' + ev, fn); },
 	removeEventListener(){}, focus(){}, select(){}, click(){}, scrollIntoView(){},
-	setProperty(){}, dispatchEvent(){}, querySelectorAll(){ return []; },
-	getBoundingClientRect(){ return {}; }, parentNode: null,
+	setProperty(){}, dispatchEvent(){}, querySelectorAll(){ return []; }, querySelector(){ return null; },
+	setAttribute(){}, getAttribute(){ return null; }, removeAttribute(){}, closest(){ return null; },
+	setSelectionRange(){}, content: { firstChild: { id: 'tpl' } }, innerHTML: '',
+	getBoundingClientRect(){ return { top: 0, bottom: 0, left: 0, right: 0 }; }, parentNode: null,
 });
 const els = new Map(ids.map(i => [i, mkEl(i)]));
 const body = mkEl('body'); body.parentNode = body;
@@ -31,13 +33,14 @@ global.document = {
 	createElement: () => mkEl('new'),
 	createTextNode: (t) => ({ text: t }),
 	addEventListener(){}, removeEventListener(){},
-	body, documentElement: { style: { setProperty(){} } },
+	body, documentElement: { style: { setProperty(){} } }, title: '', activeElement: null,
 	querySelector: () => null,
 	querySelectorAll: () => [],
 };
 global.window = { matchMedia: () => ({ matches: false }), visualViewport: null, innerHeight: 800,
                   addEventListener(){} };
 global.localStorage = { getItem: () => null, setItem(){}, removeItem(){} };
+global.sessionStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 global.fetch = async () => ({ json: async () => ({}), ok: true });
 global.EventSource = function(){ return { onopen: null, onerror: null, onmessage: null }; };
 global.setTimeout = (fn) => 0;

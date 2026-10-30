@@ -14,7 +14,7 @@ try:
 except ImportError:
     sys.exit("pip install playwright && playwright install chromium")
 R = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-HAKO = R + "/hako-code/hako"; FAKE = R + "/hako-code/tools/tty/fakehakm.py"
+HAKO = os.environ.get("HAKO_BIN") or R + "/hako-code/hako"; FAKE = R + "/hako-code/tools/tty/fakehakm.py"
 RELAY = R + "/hako-studio/relay/relay"; DIST = R + "/hako-studio/dist-remote"   # its own build: dist/ may be serving a hand test
 RP, SP = 18793, 8794
 STUDIO = "http://localhost:%d" % SP
@@ -163,7 +163,12 @@ with sync_playwright() as p:
     pg.wait_for_function("location.hash.startsWith('#remote=')", timeout=5000)
     pg.wait_for_timeout(2500)
     ck(until(rb"a device on your account connected") is not None, "desktop: the page's session arrives")
-    ck(pg.locator('#btn-dir').is_hidden() and pg.locator('#mode-code.on').count() == 1, "page: in code, no folder browsing; the menu says code")
+    pg.click('#btn-dir'); pg.wait_for_selector('.modal h2', timeout=10000); pg.wait_for_timeout(800)
+    fh = pg.locator('.modal h2').inner_text()
+    ck(fh.lower().startswith('files') and pg.locator('.modal button:has-text("open this folder")').count() == 0 and pg.locator('#mode-code.on').count() == 1
+       and pg.locator('#wordmark').get_attribute('aria-label') == 'code',
+       "page: in code, files stays inside the folder (no open another); the menu says code (%r)" % fh)
+    pg.locator('.modal button:has-text("close")').last.click(); pg.wait_for_timeout(300)
     ck("proj" in pg.inner_text('#project-list'), "page: the menu lists the project (the shared folder)")
     ck(pg.locator('#here').is_visible(), "page: in a session, the folder's own chats show too")
     for mo in pg.locator('.modal').all(): print("modal open:", mo.inner_text().replace("\n", " | "))
@@ -324,13 +329,13 @@ with sync_playwright() as p:
                and gp.evaluate("relay.acct") == pg.evaluate("relay.acct"),
                "%s: a fresh browser signs in with %s mid-pairing and gets the account key" % (sp, sname))
             ck("code=" not in gp.url and "#pair=" not in gp.url, "%s: the code and the pair secret leave the address bar" % sp)
-            ck(gp.locator('#acct svg').count() == 1 and ("signed in with " + sname) in gp.inner_text('#acct')
+            ck(gp.locator('#acct svg').count() == 1 and ("signed in with " + sname) in gp.evaluate("$('acct').textContent")
                and ("signed in with " + sname) in gp.locator('.modal').inner_text(),
                "%s: the menu foot and the sheet say signed in with %s, with its mark" % (sp, sname))
             gdev = gp.evaluate("relay.id")
             gp.locator('.modal button:has-text("sign out")').click(); gp.wait_for_timeout(1500)
             ck(gp.evaluate("(async () => { await relay.signIn(); return relay.acct + '|' + (await kvGet('k') ? 'k' : '') + '|' + (relay.id !== %r); })()" % gdev) == "||true"
-               and "sign in" in gp.inner_text('#acct')
+               and "sign in" in gp.evaluate("$('acct').textContent")
                and gdev not in pg.evaluate("(async () => (await relay.req('GET', '/v1/devices')).text)()"),
                "%s: sign out drops the device from the account and forgets the key; the menu says sign in" % sp)
             gp.evaluate("document.getElementById('acct-btn').click()")
@@ -416,8 +421,10 @@ with sync_playwright() as p:
     pg.click('#mode-code'); pg.wait_for_timeout(3000)
     ck(pg.locator('#here').is_hidden() and pg.locator('#project-list .sess.k-code').count() == 1, "page: code lists code sessions only")
     ck('#remote=' not in pg.url and pg.locator('.modal').count() == 0 and "proj" in pg.inner_text('#project-list')
-       and "add a device" in pg.inner_text('#project-list'), "page: code lists the sessions in the menu, with add a device, no popup")
-    pg.locator('#project-list button:has-text("add a device")').click()
+       and "add a device" not in pg.inner_text('#project-list') and pg.locator('#chooser').is_visible()
+       and "proj" in pg.inner_text('#chooser') and "add a device" in pg.inner_text('#chooser') and pg.locator('#chooser .pick.sel').count() == 1,
+       "page: code lists the sessions in recents; the code landing picks one (proj) and offers add a device, no popup")
+    pg.locator('#chooser button:has-text("add a device")').click()
     ck(":remote on" in pg.locator('.modal').inner_text(), "page: add a device says to run :remote on in the folder")
     pg.locator('.modal button:has-text("close")').click()
     # the computer's upload dies while its download lives (the relay still lists it online):
@@ -489,6 +496,17 @@ with sync_playwright() as p:
     ck("see this [image #1]" in pg.inner_text('#log') and any(os.path.getsize(i) == 600000 for i in imgs),
        "page: a pasted image crosses the relay whole and the message names it (%s | tray %r | %r)"
        % ([os.path.getsize(i) for i in imgs], pg.inner_text('#tray'), pg.inner_text('#log')[-160:]))
+    # the code landing: a message typed before any session is open goes to the folder picked there
+    try: pg.wait_for_function("$('send').textContent.trim() === 'send'", timeout=15000)
+    except Exception: pass
+    pg.click('#mode-chat'); pg.wait_for_timeout(2500)
+    pg.click('#mode-code'); pg.wait_for_selector('#chooser .pick.sel', timeout=10000)
+    pg.fill('#input', 'hey from the code landing'); pg.click('#send')
+    try:
+        pg.wait_for_function("location.hash.startsWith('#remote=') && document.body.innerText.includes('hey from the code landing')", timeout=20000)
+        ck(pg.evaluate("sessionStorage.getItem('hako-send')") is None, "page: the code landing opens the picked folder and sends what was typed there")
+    except Exception as e:
+        ck(False, "page: the code landing opens the picked folder and sends what was typed there (%s)" % str(e)[:60])
     ck(not errs, "page: no JS errors %s" % errs[:2])
     b.close()
 

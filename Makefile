@@ -86,19 +86,27 @@ wasm: toolchain
 # The worker and the wasm are one unit with the page. A browser holding a stale
 # copy of either produces errors that look like logic bugs, so every build gets
 # a stamp the URLs carry.
+# The icon is named by its checksum: browsers keep an icon by its address, so a
+# new icon at an old address (or the old address plus ?v=2) kept showing the old
+# art. favicon.ico and apple-touch-icon.png sit at the root for anything that
+# asks there without reading the page.
 site: wasm
 	@mkdir -p $(DIST)
-	@stamp=$$(date +%s); \
+	@stamp=$$(date +%s); icon=icon-$$(cksum < icon-180.png | cut -d' ' -f1).png; \
 	sed -e "s|<title>hako</title>|<meta name=\"hako-mode\" content=\"wasm\"><meta name=\"hako-build\" content=\"$$stamp\"><title>hako</title>|" \
 	    -e "s|new Worker('hako-worker.js'|new Worker('hako-worker.js?v=$$stamp'|" \
 	    -e "s|wasmUrl: 'hako.wasm'|wasmUrl: 'hako.wasm?v=$$stamp'|" \
+	    -e "s|/apple-touch-icon-180.png|/$$icon|" -e "s|/favicon-180.png|/$$icon|" \
 	    $(if $(RELAY_URL),-e "s|<title>hako</title>|<meta name=\"hako-relay\" content=\"$(RELAY_URL)\"><title>hako</title>|") \
 	    index.html > $(DIST)/index.html; \
-	echo "build stamp $$stamp"
+	cp icon-180.png $(DIST)/$$icon; \
+	printf '%s\n' '{"id":"/","name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/'$$icon'","sizes":"180x180","type":"image/png","purpose":"any"}]}' > $(DIST)/manifest.webmanifest; \
+	echo "build stamp $$stamp, icon $$icon"
 	@cp hako.wasm tools/hako-glue.js tools/hako-worker.js $(DIST)/
-	@cp icon-180.png $(DIST)/ 2>/dev/null || true
+	@cp icon-180.png $(DIST)/icon-180.png          # an old home-screen icon still asks here
+	@cp icon-180.png $(DIST)/apple-touch-icon.png
+	@cp favicon.ico $(DIST)/favicon.ico
 	@cp og.png $(DIST)/ 2>/dev/null || true      # the share-preview tile
-	@printf '%s\n' '{"name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#ece7da","theme_color":"#ece7da","icons":[{"src":"/icon-180.png","sizes":"180x180","type":"image/png","purpose":"any maskable"}]}' > $(DIST)/manifest.webmanifest
 	@echo "dist/ ready — static files, no backend:"
 	@ls -la $(DIST) | tail -n +2 | awk 'NF>3 {printf "  %-24s %8s\n", $$9, $$5}'
 

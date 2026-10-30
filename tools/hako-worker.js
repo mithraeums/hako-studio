@@ -251,7 +251,7 @@ self.onmessage = async (ev) => {
 				if (!under(p) || p.startsWith('/hako/')) continue;
 				const rest = p.slice(base === '/' ? 1 : base.length + 1);
 				const cut = rest.indexOf('/');
-				if (cut === -1) files.push({ name: rest, bytes: (storage.read(p) || '').length });
+				if (cut === -1) files.push({ name: rest, bytes: (storage.read(p) || '').length, mtime: storage.mtime ? storage.mtime(p) : 0 });
 				else dirs.add(rest.slice(0, cut));
 			}
 			for (const d of storage.listDirs(base)) {
@@ -354,7 +354,7 @@ self.onmessage = async (ev) => {
 				}
 				/* OPFS keeps no mtime; the id starts with its creation time in hex. */
 				const born = parseInt(id.slice(0, 8), 16);
-				if (!title && id !== sessionId) continue;   /* every page load opens one; one with no prompt in it is noise */
+				if (!title) continue;   /* every page load opens one; one with no prompt in it is noise, the open one too */
 				out.push({ id, title, mtime: born > 1e9 ? born : 0, turns, path: p });
 			}
 			self.postMessage({ type: 'sessions', id: msg.id, sessions: out });
