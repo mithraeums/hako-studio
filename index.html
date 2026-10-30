@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ece7da">
+<meta name="theme-color" content="#ffffff">
 <meta name="description" content="The hako coding agent, compiled to WebAssembly and running in your browser tab. No account, no backend, no install; your key goes straight to the provider.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mithraeum">
@@ -23,31 +23,41 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="hako">
 <!-- Real resources, not data: URIs — iOS ignores a data URI for a touch icon.
-     Both are served by the binary out of the same embedded bundle. -->
-<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png?v=2">
-<link rel="icon" type="image/png" href="/icon-180.png?v=2">
+     hako --serve answers any /favicon* and /apple-touch-icon* from its embedded
+     bundle; `make site` renames these to the icon's checksum, because browsers
+     keep an icon by its address and the ス kept the old art's address. -->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png">
+<link rel="icon" type="image/png" sizes="180x180" href="/favicon-180.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>hako</title>
 <style>
 	:root {
-		--bg:      #ece7da;
-		--panel:   #e4dece;
-		--panel-2: #dad3c1;
-		--line:    #cfc7b3;
-		--line-2:  #b9b09a;
-		--bone:    #1d1c19;
-		--gold:    #2636c4;
-		--gold-dim:#6a76c9;
-		--phos:    #e2402e;
-		--dim:     #5f5a4e;
-		--faint:   #8a8473;
-		--err:     #c2311f;
-		--ink:     #ece7da;
+		--bg:      #ffffff;
+		--panel:   #f7f7f7;
+		--panel-2: #ececec;
+		--line:    #e3e3e3;
+		--line-2:  #cccccc;
+		--bone:    #1d1d1f;
+		--gold:    #1d1d1f;
+		--gold-dim:#8e8e93;
+		--phos:    #636366;
+		--dim:     #6e6e73;
+		--faint:   #9a9aa0;
+		--err:     #c9302c;
+		--ink:     #ffffff;
 		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-		--sidebar: 250px;
+		--serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+		--sidebar: 268px;
+		--col: 768px;
+	}
+	/* terminal, the default, before the script runs: the system's own light or dark */
+	@media (prefers-color-scheme: dark) {
+		:root { --bg:#1c1c1e; --panel:#232325; --panel-2:#2c2c2e; --line:#38383a; --line-2:#48484a; --bone:#e5e5e7;
+		        --gold:#e5e5e7; --gold-dim:#8e8e93; --phos:#a1a1a6; --dim:#98989d; --faint:#6e6e73; --err:#ff6961; --ink:#1c1c1e; }
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; margin: 0; }
+	html { overflow: hidden; overscroll-behavior: none; }
 	body {
 		background: var(--bg); color: var(--bone);
 		font: 14px/1.55 var(--mono);
@@ -61,50 +71,88 @@
 	   visualViewport for the keyboard case, which no CSS unit tracks. */
 	@supports (height: 100dvh) { html, body { height: 100dvh; } }
 	body { position: fixed; left: 0; right: 0; top: var(--vt, 0); height: var(--vh, 100dvh); }
-	button, .sess, .opt { touch-action: manipulation; }   /* no double-tap zoom */
+	button, .sess, .opt, .navrow, .card, .pill { touch-action: manipulation; }   /* no double-tap zoom */
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
 	::-webkit-scrollbar-track { background: transparent; }
+	svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
+	button {
+		font: inherit; cursor: pointer; border-radius: 6px; background: transparent;
+		color: var(--bone); border: 1px solid var(--line-2); padding: .3rem .6rem; font-size: 12px;
+	}
+	button:hover { border-color: var(--gold-dim); color: var(--gold); }
+	button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+	button.primary { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 600; }
+	button.primary:hover { filter: brightness(1.1); color: var(--ink); }
+	button:disabled { opacity: .35; cursor: default; }
+	.grow { flex: 1; }
+
+	/* ---- the menu: wordmark and chat/code at the top, then rows, recents, the account ---- */
 	aside {
 		width: var(--sidebar); flex: none; background: var(--panel);
-		border-right: 1px solid var(--line); display: flex; flex-direction: column;
+		border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0;
 		padding-top: env(safe-area-inset-top);
 	}
-	aside .sec { padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
-	aside .modes { display: flex; gap: 3px; padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
-	aside .modes[hidden], aside .projects[hidden] { display: none; }
-	aside .modes button { flex: 1; }
-	aside .modes button.on { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+	.ib {
+		display: inline-flex; align-items: center; justify-content: center; flex: none;
+		width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px;
+		color: var(--dim); background: transparent;
+	}
+	.ib:hover { color: var(--bone); background: var(--panel-2); border-color: transparent; }
+	.shead { display: flex; align-items: center; gap: .35rem; padding: .55rem .55rem .5rem; min-height: 50px; }
+	.wordmark { display: inline-flex; align-items: center; color: var(--gold); min-width: 0; }
+	.wordmark svg { display: block; height: 17px; width: auto; overflow: visible; }
+	.wordmark .off { fill: currentColor; opacity: .16; }
+	.wordmark .on { fill: currentColor; }
+	.modes { margin-left: auto; display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 10px; }
+	.modes[hidden], .projects[hidden], .here[hidden], [hidden] { display: none !important; }
+	.modes .ib { width: 32px; height: 28px; border-radius: 7px; }
+	.modes .ib.on { background: var(--bg); color: var(--bone); box-shadow: 0 0 0 1px var(--line-2); }
+	.rows { display: flex; flex-direction: column; gap: 1px; padding: .1rem .45rem .45rem; }
+	.navrow {
+		display: flex; align-items: center; gap: .65rem; width: 100%; text-align: left;
+		border: 1px solid transparent; border-radius: 8px; padding: .42rem .55rem;
+		color: var(--bone); font-size: 13px; background: transparent;
+	}
+	.navrow .i { color: var(--dim); }
+	.navrow:hover { background: var(--panel-2); color: var(--bone); border-color: transparent; }
+	.navrow:hover .i { color: var(--bone); }
+	.searchbox { padding: 0 .1rem .2rem; }
+	.searchbox input {
+		width: 100%; font: inherit; font-size: 13px; color: var(--bone); background: var(--bg);
+		border: 1px solid var(--line-2); border-radius: 8px; padding: .4rem .55rem;
+	}
+	.searchbox input:focus { outline: none; border-color: var(--gold-dim); }
+	.recents { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 .45rem .5rem; }
 	.label {
 		font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
 		color: var(--faint); margin-bottom: .35rem;
 	}
-	.dirline { display: flex; gap: .4rem; font-size: 12px; word-break: break-all; }
-	.dirline .path { flex: 1; color: var(--gold); }
-	.sessions { flex: 1; overflow-y: auto; padding: .4rem; }
+	.recents .label { padding: .55rem .55rem .1rem; margin: 0; }
+	.recents .note { padding: .35rem .55rem; }
 	.sess {
-		display: block; width: 100%; text-align: left; background: transparent;
-		border: 1px solid transparent; color: var(--bone); font: inherit; font-size: 12px;
-		padding: .4rem .5rem; border-radius: 3px; cursor: pointer;
-		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		display: flex; align-items: baseline; gap: .5rem; width: 100%; text-align: left; background: transparent;
+		border: 1px solid transparent; color: var(--bone); font: inherit; font-size: 13px;
+		padding: .38rem .55rem; border-radius: 8px; cursor: pointer; min-width: 0;
 	}
-	.sess:hover { background: var(--panel-2); border-color: var(--line); }
-	.sess.cur { border-color: var(--gold-dim); color: var(--gold); }
-	.sess .when { display: block; color: var(--faint); font-size: 10px; }
-	/* hosted, a row says what it is: a code session (an agent on a computer) or a chat in this browser */
-	.sess.k-code::before, .sess.k-chat::before { display: inline-block; width: 1.3em; }
+	.sess .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.sess .when { flex: none; color: var(--faint); font-size: 10.5px; }
+	.sess:hover { background: var(--panel-2); border-color: transparent; color: var(--bone); }
+	.sess.cur { background: var(--panel-2); color: var(--gold); }
+	/* signed in, a row says what it is: a code session (hako on a computer) or a chat in this browser */
+	.sess.k-code::before, .sess.k-chat::before { flex: none; width: 1em; }
 	.sess.k-code::before { content: '\25A3'; color: var(--gold); }
 	.sess.k-chat::before { content: '\25CB'; color: var(--faint); }
-	.sess.k-code .when, .sess.k-chat .when { padding-left: 1.3em; }
-	.here { display: contents; }
-	.here[hidden] { display: none; }
-	.sessrow { display: flex; align-items: stretch; gap: .2rem; }
+	.sessrow { display: flex; align-items: stretch; gap: 1px; border-radius: 8px; }
 	.sessrow .sess { flex: 1; min-width: 0; }
-	/* Always visible, dim until hovered — discoverable without hunting for them. */
 	.sessrow .act {
 		flex: none; border: 1px solid transparent; background: transparent;
-		color: var(--faint); padding: 0 .4rem; font-size: 13px; line-height: 1;
+		color: var(--faint); padding: 0 .38rem; font-size: 13px; line-height: 1; border-radius: 6px;
+	}
+	@media (hover: hover) {
+		.sessrow .act { visibility: hidden; }
+		.sessrow:hover .act, .sessrow:focus-within .act { visibility: visible; }
 	}
 	.sessrow .act:hover { border-color: var(--line); }
 	.sessrow .act.ren:hover { color: var(--gold); }
@@ -112,9 +160,8 @@
 
 	/* who is signed in, at the foot of the menu, like every app with accounts */
 	.acct { margin-top: auto; border-top: 1px solid var(--line); padding: .4rem; }
-	.acct[hidden] { display: none; }
-	.acct button { display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; border-color: transparent; padding: .45rem .5rem; }
-	.acct button:hover { border-color: var(--line); }
+	.acct button { display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; border-color: transparent; padding: .45rem .5rem; border-radius: 8px; }
+	.acct button:hover { border-color: transparent; background: var(--panel-2); }
 	.acct .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.acct .who span { display: block; color: var(--faint); font-size: 10px; }
 	.ico { width: 18px; height: 18px; flex: none; }
@@ -129,39 +176,64 @@
 	.qr { display: block; width: min(220px, 64vw); height: auto; margin: .4rem auto; border-radius: 3px; }
 	.modal input.pairlink { font-size: 11px; color: var(--faint); }
 
+	/* ---- the page: header, then the conversation (or the landing), then the composer ---- */
+	main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+	header {
+		display: flex; align-items: center; gap: .45rem; padding: .45rem .7rem; min-height: 50px;
+		padding-top: max(.45rem, env(safe-area-inset-top)); flex: none; background: var(--bg);
+	}
+	header .burger, header .hmark { display: none; }
+	header .hmark { flex: none; }   /* never shrinks: a long title once ran under it on a phone */
+	body.side-off header .burger, body.side-off header .hmark { display: inline-flex; }
+	header .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 13px; padding-left: .2rem; }
+	header .spacer { flex: 1; }
+	header .dot { color: var(--err); font-size: 9px; }
+	header .dot.on { color: var(--phos); }
+	header .meta { color: var(--dim); font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+	header .meta b { color: var(--bone); font-weight: 400; }
+	.ind { display: flex; gap: .35rem; }
+	.ind > * {
+		border: 1px solid var(--line); border-radius: 99px; padding: .05rem .5rem; font-size: 11px;
+		color: var(--dim); background: transparent; white-space: nowrap;
+	}
+	.ind .on::before { content: '\25CF\00a0'; color: var(--phos); font-size: 8px; vertical-align: 1px; }
+	.ind button:hover { color: var(--gold); border-color: var(--gold-dim); }
+
+	.stage { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+	#log {
+		flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+		padding: .6rem max(.9rem, calc((100% - var(--col)) / 2)) 1.4rem;
+	}
 	.thinking { color: var(--gold); margin: 0 0 1rem; }
 	.thinking .frame { display: inline-block; width: 1.2em; }
 	.thinking .elapsed { color: var(--faint); }
-	.sidefoot { padding: .5rem; border-top: 1px solid var(--line); display: flex; gap: .4rem; flex-wrap: wrap; }
-
-	button {
-		font: inherit; cursor: pointer; border-radius: 3px; background: transparent;
-		color: var(--bone); border: 1px solid var(--line-2); padding: .3rem .6rem; font-size: 12px;
-	}
-	button:hover { border-color: var(--gold-dim); color: var(--gold); }
-	button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
-	button.primary { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 600; }
-	button.primary:hover { filter: brightness(1.1); color: var(--ink); }
-	button:disabled { opacity: .35; cursor: default; }
-
-	main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-	header {
-		display: flex; align-items: center; gap: .55rem; padding: .5rem .8rem;
-		padding-top: max(.5rem, env(safe-area-inset-top));
-		border-bottom: 1px solid var(--line); background: var(--panel); flex: none;
-	}
-	header .burger { display: none; }
-	header .mark { color: var(--gold); font-weight: 700; letter-spacing: .09em; }
-	header .dot { color: var(--err); font-size: 11px; }
-	header .dot.on { color: var(--phos); }
-	header .meta { margin-left: auto; color: var(--dim); font-size: 12px; text-align: right; }
-	header .meta b { color: var(--bone); font-weight: 400; }
-
-	#log { flex: 1 1 auto; overflow-y: auto; padding: 1rem .9rem 1.4rem; -webkit-overflow-scrolling: touch; }
 	.turn { margin: 0 0 1rem; white-space: pre-wrap; word-break: break-word; }
-	.turn .who { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: .25rem; }
+	.turn .who { display: flex; align-items: center; gap: .4rem; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: .25rem; }
+	.user { background: var(--panel); border-radius: 12px; padding: .55rem .8rem .6rem; width: fit-content; max-width: 100%; margin-left: auto; }
 	.user .who { color: var(--gold); }
 	.model .who { color: var(--faint); }
+	.md { white-space: normal; }
+	.md > :last-child { margin-bottom: 0; }
+	.md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 .65rem; }
+	.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: 1em; font-weight: 600; margin: .9rem 0 .4rem; }
+	.md h1 { font-size: 1.15em; } .md h2 { font-size: 1.07em; }
+	.md ul, .md ol { padding-left: 1.4rem; }
+	.md li { margin: .15rem 0; }
+	.md li.task { list-style: none; margin-left: -1.2rem; }
+	.md code { background: var(--panel); border-radius: 4px; padding: .05em .3em; }
+	.md pre { white-space: pre; overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .75rem; }
+	.md pre code { background: none; padding: 0; }
+	.md blockquote { border-left: 2px solid var(--line-2); padding-left: .75rem; color: var(--dim); }
+	.md hr { border: 0; border-top: 1px solid var(--line); margin: .9rem 0; }
+	.md table { border-collapse: collapse; display: block; overflow-x: auto; }
+	.md th, .md td { border: 1px solid var(--line); padding: .25rem .55rem; text-align: left; }
+	.md a { color: var(--gold); }
+	.say {
+		border: 0; padding: 2px; margin: -2px 0; width: 22px; height: 18px; border-radius: 5px;
+		color: var(--faint); display: inline-flex; align-items: center; justify-content: center;
+	}
+	.say svg.i { width: 14px; height: 14px; }
+	.say:hover, .say.on { color: var(--gold); background: var(--panel); }
 	.system { color: var(--dim); }
 	.error { color: var(--err); }
 	.tool {
@@ -173,83 +245,159 @@
 	.tool.result {
 		color: var(--bone); background: var(--panel); border-left-color: var(--gold-dim);
 		padding: .5rem .6rem; margin: -.3rem 0 .8rem; max-height: 15rem; overflow: auto;
-		font-size: 12.5px;
+		font-size: 12.5px; border-radius: 0 6px 6px 0;
 	}
-	.ask { border: 1px solid var(--gold-dim); border-radius: 4px; background: var(--panel); padding: .65rem; margin: 0 0 .9rem; }
+	.ask { border: 1px solid var(--gold-dim); border-radius: 8px; background: var(--panel); padding: .65rem; margin: 0 0 .9rem; }
 	.ask .head { color: var(--gold); }
 	.ask .subj { display: block; color: var(--dim); margin: .2rem 0 .6rem; word-break: break-all; white-space: pre-wrap; }
 	.ask .row { display: flex; flex-wrap: wrap; gap: .4rem; }
 	.ask.settled { border-color: var(--line); opacity: .75; }
 	.ask.settled .row { display: none; }
 	.ask .verdict { color: var(--dim); font-size: 12px; margin-left: .5rem; }
+	.turn a, .system a { color: var(--gold); }
 
-	/* Attachments sit above the composer, as chips you can drop individually —
-	   the same shape every chat app uses, because it is the one people know. */
-	.tray {
-		flex: none; display: flex; flex-wrap: wrap; gap: .35rem;
-		padding: .5rem .6rem 0; background: var(--panel);
-		border-top: 1px solid var(--line);
+	/* ---- the composer: one box, a + and send inside, chips under it ---- */
+	form {
+		flex: none; position: relative; width: 100%; max-width: calc(var(--col) + 1.8rem); margin: 0 auto;
+		padding: .3rem .9rem; padding-bottom: max(.55rem, env(safe-area-inset-bottom));
 	}
+	body.kb form { padding-bottom: .5rem; }   /* the keyboard covers the home bar, so no inset over it */
+	.cbox {
+		display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 14px;
+		background: var(--panel); transition: border-color .15s;
+	}
+	.cbox:focus-within { border-color: var(--gold-dim); }
+	textarea {
+		display: block; width: 100%; resize: none; min-height: 2.9rem; max-height: 12rem;
+		padding: .7rem .85rem .15rem; font: inherit; color: var(--bone); background: transparent; border: 0;
+	}
+	textarea:focus { outline: none; }
+	textarea::placeholder { color: var(--faint); }
+	.crow { display: flex; align-items: center; gap: .35rem; padding: .25rem .45rem .45rem; }
+	.attach { font-size: 18px; line-height: 1; width: 32px; height: 30px; padding: 0; color: var(--dim); border-color: transparent; border-radius: 8px; }
+	.attach:hover { color: var(--gold); background: var(--panel-2); border-color: transparent; }
+	#send { border-radius: 9px; padding: .3rem .8rem; }
+	/* Attachments sit on top of the field, as chips you can drop one by one. */
+	.tray { display: flex; flex-wrap: wrap; gap: .35rem; padding: .55rem .6rem 0; }
 	.chip {
 		display: inline-flex; align-items: center; gap: .4rem; max-width: 100%;
-		border: 1px solid var(--line-2); border-radius: 3px; background: var(--bg);
-		color: var(--bone); font-size: 12px; padding: .25rem .5rem;
+		border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg);
+		color: var(--bone); font-size: 12px; padding: .2rem .5rem;
 	}
 	.chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.chip .rm { color: var(--faint); cursor: pointer; border: 0; background: none; font: inherit; padding: 0 .1rem; }
 	.chip .rm:hover { color: var(--err); }
+	.pills { display: flex; align-items: center; gap: .2rem; padding: .35rem .25rem 0; min-width: 0; }
+	.pill {
+		display: inline-flex; align-items: center; gap: .35rem; min-width: 0; max-width: 46%;
+		border: 0; background: transparent; color: var(--dim); font-size: 12px; padding: .2rem .4rem; border-radius: 6px;
+	}
+	.pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.pill .i { width: 14px; height: 14px; }
+	.pill:hover { color: var(--bone); background: var(--panel-2); }
+	.pill:disabled { opacity: .6; }
+	.pills .sep { color: var(--faint); }
 	.pending {
-		flex: none; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--gold-dim);
-		background: var(--panel-2); color: var(--gold); font: inherit; font-size: 12px;
-		padding: .5rem .7rem; cursor: pointer;
+		flex: none; width: 100%; max-width: calc(var(--col) + 1.8rem); margin: 0 auto; text-align: left; border: 0;
+		border-top: 1px solid var(--gold-dim); background: var(--panel-2); color: var(--gold); font: inherit; font-size: 12px;
+		padding: .5rem .9rem; cursor: pointer; border-radius: 0;
 	}
 	.pending:hover { background: var(--panel); color: var(--gold); }
-	.attach { flex: none; font-size: 17px; line-height: 1; padding: .3rem .55rem; color: var(--dim); }
-	.attach:hover { color: var(--gold); }
-	.turn a, .system a { color: var(--gold); }
 
-	form {
-		flex: none; display: flex; gap: .5rem; padding: .6rem;
-		padding-bottom: max(.6rem, env(safe-area-inset-bottom));
-		border-top: 1px solid var(--line); background: var(--panel);
+	/* the command menu: what `:` and `/` can do, over the composer */
+	.cmdmenu {
+		position: absolute; left: .9rem; right: .9rem; bottom: calc(100% - .2rem); z-index: 5;
+		background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px;
+		box-shadow: 0 10px 30px rgba(0,0,0,.18); max-height: min(19rem, 42vh); overflow-y: auto;
+		overscroll-behavior: contain; padding: .3rem;
 	}
-	body.kb form { padding-bottom: .6rem; }   /* the keyboard covers the home bar, so no inset over it */
-	textarea {
-		flex: 1; resize: none; min-height: 2.6rem; max-height: 9rem; padding: .5rem .6rem;
-		font: inherit; color: var(--bone); background: var(--bg);
-		border: 1px solid var(--line-2); border-radius: 3px;
+	.cmd {
+		display: flex; align-items: baseline; gap: .6rem; width: 100%; text-align: left;
+		border: 1px solid transparent; border-radius: 8px; padding: .38rem .55rem; font-size: 13px; color: var(--bone);
 	}
-	textarea:focus { outline: none; border-color: var(--gold); }
+	.cmd:hover { border-color: transparent; background: var(--panel-2); color: var(--bone); }
+	.cmd.sel { background: var(--panel-2); border-color: var(--line-2); }
+	.cmd .n { flex: none; color: var(--gold); }
+	.cmd .a { flex: none; color: var(--faint); }
+	.cmd .d { flex: 1; min-width: 0; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.cmd .c { flex: none; color: var(--faint); font-size: 10.5px; letter-spacing: .06em; }
 
+	/* ---- the landing: a greeting, the composer centered under it, recent files ---- */
+	.hello, .below { display: none; }
+	body.landing #log { display: none; }
+	body.landing .hello {
+		display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; justify-content: flex-end; align-items: center;
+		padding: 1rem 1rem 1.5rem;
+	}
+	body.landing .below {
+		display: block; flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+		width: 100%; max-width: calc(var(--col) + 1.8rem); margin: 0 auto; padding: 1.1rem 1.15rem 1rem;
+	}
+	.greet {
+		display: flex; align-items: center; justify-content: center; gap: .65rem; text-align: center;
+		font-family: var(--serif); font-size: clamp(25px, 4vw, 36px); line-height: 1.2; letter-spacing: -.005em;
+		color: var(--bone); text-wrap: balance;
+	}
+	.greet svg { width: 1.05em; height: 1.05em; flex: none; }
+	.greet .mk-off { fill: var(--gold); opacity: .16; }
+	.greet .mk-on { fill: var(--gold); }
+	.hello .sub { color: var(--faint); font-size: 12px; margin-top: .55rem; text-align: center; }
+	.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
+	.card {
+		display: flex; flex-direction: column; gap: .15rem; min-width: 0; text-align: left;
+		border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: .55rem .65rem;
+	}
+	.card:hover { border-color: var(--gold-dim); color: var(--bone); }
+	.card .nm { color: var(--bone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+	.card .sub { color: var(--faint); font-size: 11px; }
+	.below .label { display: flex; padding: 0 .1rem; }
+	/* code, before a session is open: pick one of your computers' folders */
+	.chooser {
+		width: min(520px, 100%); margin-top: 1.1rem; border: 1px solid var(--line); border-radius: 12px;
+		background: var(--panel); overflow: hidden; text-align: left;
+	}
+	.chooser .pick {
+		display: flex; align-items: center; gap: .65rem; width: 100%; border: 0; border-bottom: 1px solid var(--line);
+		border-radius: 0; padding: .6rem .8rem; font-size: 13px; text-align: left; background: transparent; color: var(--bone);
+	}
+	.chooser .pick:last-child { border-bottom: 0; }
+	.chooser .pick:hover { background: var(--panel-2); color: var(--bone); }
+	.chooser .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.chooser .pick .sub { color: var(--faint); font-size: 11px; }
+	.chooser .pick .ok { color: var(--gold); visibility: hidden; }
+	.chooser .pick.sel .ok { visibility: visible; }
+	.chooser .note { border-bottom: 1px solid var(--line); }
+
+	/* ---- sheets ---- */
 	.scrim {
-		position: fixed; inset: 0; background: rgba(4,4,2,.74); display: flex;
-		align-items: center; justify-content: center; padding: 1rem; z-index: 20;
+		position: fixed; inset: 0; background: rgba(4,4,2,.6); display: flex;
+		align-items: center; justify-content: center; padding: 1rem; z-index: 40;
 	}
 	.modal {
-		background: var(--panel); border: 1px solid var(--gold-dim); border-radius: 4px;
-		width: min(620px, 100%); max-height: 84vh; display: flex; flex-direction: column;
+		background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px;
+		width: min(620px, 100%); max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
 	}
 	.modal h2 {
-		margin: 0; padding: .6rem .75rem; font-size: 11px; letter-spacing: .14em;
+		margin: 0; padding: .65rem .8rem; font-size: 11px; letter-spacing: .14em;
 		text-transform: uppercase; color: var(--gold); border-bottom: 1px solid var(--line);
 		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
-	.modal .body { overflow-y: auto; padding: .45rem; }
+	.modal .body { overflow-y: auto; overscroll-behavior: contain; padding: .45rem; }
 	.modal .foot { padding: .5rem; border-top: 1px solid var(--line); display: flex; gap: .4rem; align-items: center; }
 	.modal .foot .grow { flex: 1; }
 	.modal input {
 		width: 100%; font: inherit; color: var(--bone); background: var(--bg);
-		border: 1px solid var(--line-2); border-radius: 3px; padding: .4rem .5rem;
+		border: 1px solid var(--line-2); border-radius: 6px; padding: .4rem .5rem;
 	}
 	.modal input:focus { outline: none; border-color: var(--gold); }
 	.opt {
 		display: block; width: 100%; text-align: left; border: 1px solid transparent;
 		background: transparent; color: var(--bone); font: inherit; padding: .4rem .55rem;
-		border-radius: 3px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
 	.opt.sel { background: var(--panel-2); border-color: var(--gold-dim); color: var(--gold); }
 	/* A touch screen keeps :hover on the last row tapped; styled like .sel, that read as two selected. */
-	@media (hover: hover) { .opt:not(.sel):hover { background: var(--panel); } }
+	@media (hover: hover) { .opt:not(.sel):hover { background: var(--bg); } }
 	.opt .tag { color: var(--phos); font-size: 11px; }
 	.opt .sub { color: var(--faint); font-size: 11px; }
 	.grouplabel {
@@ -259,7 +407,6 @@
 	.note { color: var(--dim); font-size: 12px; padding: .55rem; line-height: 1.6; }
 	.note b { color: var(--bone); font-weight: 400; }
 	.note code { color: var(--gold); }
-	/* Breadcrumbs: every ancestor one tap away, wrapping on narrow screens. */
 	/* Full-screen picker: sticky path, big rows, sticky action bar. */
 	.modal.sheet { width: min(760px, 100%); height: 92dvh; max-height: 92dvh; }
 	.modal.sheet .body { flex: 1; }
@@ -269,92 +416,135 @@
 		border-bottom: 1px solid var(--line); margin: -.45rem -.45rem .35rem;
 		padding: .5rem .55rem;
 	}
+	/* Breadcrumbs: every ancestor one tap away, wrapping on narrow screens. */
 	.crumbs { display: flex; flex-wrap: wrap; gap: .15rem; padding: .1rem .2rem .45rem; }
 	.crumb {
 		border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
-		font: inherit; font-size: 11px; padding: .2rem .45rem; border-radius: 3px; cursor: pointer;
+		font: inherit; font-size: 11px; padding: .2rem .45rem; border-radius: 5px; cursor: pointer;
 	}
 	.crumb:hover { color: var(--gold); border-color: var(--gold-dim); }
 	.places { border-bottom: 1px solid var(--line); margin-bottom: .35rem; padding-bottom: .5rem; }
 	.crumb.place { color: var(--gold); border-color: var(--gold-dim); }
-	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; box-shadow: inset 0 0 0 1px rgba(128,128,128,.25); }
 
 	/* Fingers, not cursors: hover styling never fires, so every target has to be
 	   big enough to hit and legible without it. */
 	@media (pointer: coarse) {
-		button { padding: .5rem .7rem; min-height: 40px; }
-		.sessrow .act { min-width: 42px; color: var(--dim); }
+		button { min-height: 40px; }
+		.ib, .modes .ib { min-height: 0; width: 40px; height: 36px; }
+		.navrow, .sess { padding: .55rem .55rem; }
+		.sessrow .act { min-width: 40px; color: var(--dim); }
 		.opt { padding: .6rem .55rem; }
-		.sess { padding: .55rem .5rem; }
+		.cmd { padding: .6rem .6rem; }
+		.pill { min-height: 32px; }
+		.attach, .say { min-height: 0; }
+		.say { width: 30px; height: 26px; }
 	}
 
+	/* desktop: the menu folds away entirely and a button in the header brings it back */
+	@media (min-width: 721px) {
+		aside { transition: margin-left .18s ease, visibility 0s; }
+		body.side-off aside { margin-left: calc(-1 * var(--sidebar) - 1px); visibility: hidden; transition: margin-left .18s ease, visibility 0s .18s; }
+	}
+	/* a phone: the menu is a drawer over the page */
 	@media (max-width: 720px) {
 		aside {
-			position: fixed; inset: 0 auto 0 0; z-index: 30; width: min(84vw, 320px);
-			transform: translateX(-100%); transition: transform .16s ease;
+			position: fixed; inset: 0 auto 0 0; z-index: 30; width: min(86vw, 320px);
+			transform: translateX(-100%); transition: transform .18s ease, visibility 0s .18s; visibility: hidden;
 			padding-left: env(safe-area-inset-left);
 			padding-bottom: env(safe-area-inset-bottom);
 		}
-		body.nav aside { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+		body.nav aside { transform: none; visibility: visible; transition: transform .18s ease; box-shadow: 0 0 40px rgba(0,0,0,.4); }
 		body.nav::after {                      /* tap-anywhere-else closes the drawer */
-			content: ''; position: fixed; inset: 0; z-index: 29; background: rgba(4,4,2,.55);
+			content: ''; position: fixed; inset: 0; z-index: 29; background: rgba(4,4,2,.45);
 		}
-		header .burger { display: inline-block; }
-		header { padding-left: max(.8rem, env(safe-area-inset-left)); }
-		header .meta { font-size: 11px; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		#log { padding: .8rem .7rem 1rem; }
-		.tray { padding-left: max(.6rem, env(safe-area-inset-left)); }
+		header .burger, header .hmark { display: inline-flex; }
+		header { padding-left: max(.5rem, env(safe-area-inset-left)); padding-right: max(.6rem, env(safe-area-inset-right)); }
+		header .meta { font-size: 11px; max-width: 34%; }
+		.ind > * { padding: .05rem .4rem; }
+		#log { padding: .5rem max(.7rem, env(safe-area-inset-right)) 1rem max(.7rem, env(safe-area-inset-left)); }
 		form { padding-left: max(.6rem, env(safe-area-inset-left)); padding-right: max(.6rem, env(safe-area-inset-right)); }
+		.cmdmenu { left: .6rem; right: .6rem; }
+		.cmd .c { display: none; }
 		/* Under 16px, iOS zooms the page on focus and never zooms back. */
-		textarea, .modal input { font-size: 16px; }
+		textarea, .modal input, .searchbox input { font-size: 16px; }
 		.modal { width: 100%; max-height: 88dvh; }
 		.scrim { padding: .5rem; align-items: flex-end; }
+		body.kb .pills { display: none; }
+		/* the keyboard is up on the landing: the composer sits on it, the greeting above */
+		body.kb.landing .below { display: none; }
+		body.kb.landing .hello { padding-bottom: .8rem; }
+		.greet { font-size: 25px; flex-direction: column; gap: .5rem; }   /* the mark above the words, not squeezing them */
+		.greet svg { width: 1.5em; height: 1.5em; }
+		body.kb.landing .greet svg { display: none; }
+		.cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		aside, .cbox, form, .greet { transition: none !important; animation: none !important; }
 	}
 </style>
 </head>
 <body>
 
-<aside id="side">
-	<div class="modes" id="modes" hidden><button id="mode-chat" type="button">chat</button><button id="mode-code" type="button">code</button></div>
-	<div class="projects" id="projects" hidden>
-		<div class="label" style="padding:.6rem .7rem 0">code</div>
-		<div class="sessions" id="project-list"></div>
-	</div>
-	<div class="here" id="here">
-	<div class="sec">
-		<div class="label">working directory</div>
-		<div class="dirline"><span class="path" id="dir">…</span></div>
-		<div style="margin-top:.45rem; display:flex; gap:.4rem;">
-			<button id="btn-dir">browse…</button>
-			<button id="btn-settings">settings</button>
+<aside id="side" aria-label="menu">
+	<div class="shead">
+		<button class="ib" id="btn-side" type="button" title="hide the menu (ctrl+b)" aria-label="hide the menu"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg></button>
+		<span class="wordmark" id="wordmark" role="img" aria-label="hako"></span>
+		<div class="modes" id="modes" hidden>
+			<button class="ib" id="mode-chat" type="button" title="chat: hako in this browser" aria-label="chat"><svg class="i" viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/></svg></button>
+			<button class="ib" id="mode-code" type="button" title="code: hako on your computers" aria-label="code"><svg class="i" viewBox="0 0 24 24"><path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4M13.3 5.5l-2.6 13"/></svg></button>
 		</div>
 	</div>
-	<div class="label" style="padding:.6rem .7rem 0">files here</div>
-	<div class="sessions" id="files"></div>
-	<div class="label" style="padding:.6rem .7rem 0">sessions here</div>
-	<div class="sessions" id="sessions"></div>
-	<div class="sidefoot">
-		<button id="btn-new">new session</button>
-		<button id="btn-restart" title="Reload this folder — fresh session state, same agent">reload</button>
-	</div>
+	<nav class="rows">
+		<button class="navrow" id="btn-new" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>new</button>
+		<button class="navrow" id="btn-search" type="button"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>search</button>
+		<div class="searchbox" id="searchbox" hidden><input id="search" type="search" placeholder="search sessions" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+		<button class="navrow" id="btn-dir" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5"/></svg>files</button>
+		<button class="navrow" id="btn-settings" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2"/><circle cx="9" cy="16.5" r="2"/></svg>settings</button>
+	</nav>
+	<div class="recents" id="recents">
+		<div class="label" id="recents-label">recents</div>
+		<div class="projects" id="projects" hidden><div class="sessions" id="project-list"></div></div>
+		<div class="here" id="here"><div class="sessions" id="sessions"></div></div>
 	</div>
 	<div class="acct" id="acct" hidden></div>
 </aside>
 
 <main>
 	<header>
-		<button class="burger" id="burger">☰</button>
-		<span class="mark"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><g fill="var(--phos)" transform="translate(14 9)"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g><g fill="var(--gold)"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g></svg>hako</span>
-		<span class="dot" id="dot">●</span>
+		<button class="ib burger" id="burger" type="button" title="show the menu (ctrl+b)" aria-label="show the menu"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg></button>
+		<span class="wordmark hmark" id="hmark" role="img" aria-label="hako"></span>
+		<span class="title" id="title"></span>
+		<span class="spacer"></span>
+		<span class="ind" id="ind"></span>
+		<span class="dot" id="dot" aria-hidden="true">●</span>
 		<span class="meta" id="meta">connecting…</span>
 	</header>
-	<div id="log"></div>
-	<div id="tray" class="tray" hidden></div>
-	<form id="form">
-		<button id="attach" type="button" class="attach" title="attach a file">+</button>
-		<textarea id="input" rows="1" placeholder="ask, or :slash" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-		<button class="primary" id="send" type="submit">send</button>
-	</form>
+	<div class="stage" id="stage">
+		<div id="log" role="log"></div>
+		<div class="hello" id="hello">
+			<div class="greet" id="greet"></div>
+			<div class="sub" id="greet-sub"></div>
+			<div class="chooser" id="chooser" hidden></div>
+		</div>
+		<form id="form">
+			<div class="cmdmenu" id="cmdmenu" role="listbox" hidden></div>
+			<div class="cbox">
+				<div id="tray" class="tray" hidden></div>
+				<textarea id="input" rows="1" placeholder="ask anything; : or / for commands" autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="message"></textarea>
+				<div class="crow">
+					<button id="attach" type="button" class="attach" title="attach a file" aria-label="attach a file">+</button>
+					<span class="grow"></span>
+					<button class="primary" id="send" type="submit">send</button>
+				</div>
+			</div>
+			<div class="pills" id="pills"></div>
+		</form>
+		<div class="below" id="below">
+			<div class="label" id="files-label">recent files</div>
+			<div class="cards" id="files"></div>
+		</div>
+	</div>
 </main>
 
 <script>
@@ -1174,12 +1364,20 @@ window.hakoAccount = {
 		$('mode-chat').classList.toggle('on', !REMOTE_ID);
 		$('mode-code').classList.toggle('on', !!REMOTE_ID);
 		const go = (id) => { location.hash = '#remote=' + id; location.reload(); };
-		const pick = (code) => { $('mode-chat').classList.toggle('on', !code); $('mode-code').classList.toggle('on', code); };
-		/* the open code sessions (each a shared folder), right in the menu */
+		/* code without a session open is the code landing: pick a folder, say what to do */
+		const pick = (code) => {
+			$('mode-chat').classList.toggle('on', !code); $('mode-code').classList.toggle('on', code);
+			document.body.classList.toggle('code', code);
+			document.body.classList.toggle('codeland', code && !REMOTE_ID);
+			if (code && !REMOTE_ID) setLanding(true);
+			else if (!REMOTE_ID && log.querySelector && log.querySelector('.user, .model, .tool, .ask, .error')) setLanding(false);
+			renderChrome(); renderGreeting();
+		};
+		/* the open code sessions (each a shared folder), in recents */
 		const row = (label, sub, cls, fn) => {
 			const b = document.createElement('button');
 			b.className = 'sess' + cls;
-			b.textContent = label;
+			b.append(Object.assign(document.createElement('span'), { className: 'nm', textContent: label }));
 			if (sub) b.appendChild(Object.assign(document.createElement('span'), { className: 'when', textContent: sub }));
 			b.addEventListener('click', fn);
 			return b;
@@ -1188,10 +1386,11 @@ window.hakoAccount = {
 			const list = await codeSessions(), el = $('project-list');
 			el.textContent = '';
 			for (const c of list) el.appendChild(row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }));
-			el.appendChild(row('+ add a device', '', '', () => { closeNav(); this.addDevice(); }));
-			$('projects').hidden = false;
+			$('projects').hidden = !list.length;
+			window.hakoCodeLanding(list);
+			applySearch();
 		};
-		/* signed in, chat shows both, code sessions above this browser's chats; code shows
+		/* signed in, chat lists code sessions above this browser's chats; code lists
 		   code only (inside a session, that folder's chats are code too) */
 		const show = async (code) => {
 			pick(code);
@@ -1213,8 +1412,6 @@ window.hakoAccount = {
 		$('modes').hidden = false;
 		this.renderAcct();
 		if (await kvGet('acct')) relay.signIn().then(async () => { try { await settleKey(); } catch (e) {} this.renderAcct(); }, () => {});
-		/* a code session lives in its folder: no browsing to another one from here */
-		if (REMOTE_ID) $('btn-dir').hidden = true;
 		if (HASH === '#signin' || INVITE) history.replaceState(null, '', location.pathname);
 		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|pair=|remote=)/.test(location.hash)) location.reload(); });
 		window.addEventListener('hako-remote-lost', (e) => {
@@ -1228,6 +1425,7 @@ window.hakoAccount = {
 		else if (PAIR) this.open(null, PAIR);
 		else if (SSO_BACK || HASH === '#signin' || INVITE) this.open();      /* one sheet, also back from GitHub or Google */
 		if (!REMOTE_ID) show(false);
+		else pick(true);
 		if (REMOTE_ID) {
 			remote.ready.then(() => { projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
 				.catch((e) => { const m = modal('could not reach that computer'); const n = document.createElement('div'); n.className = 'note'; n.textContent = e.message; m.body.appendChild(n);
@@ -1665,15 +1863,20 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 <script>
 const $ = (id) => document.getElementById(id);
 const log = $('log'), meta = $('meta'), dot = $('dot'), form = $('form');
-const input = $('input'), send = $('send'), sessionsEl = $('sessions'), dirEl = $('dir');
+const input = $('input'), send = $('send'), sessionsEl = $('sessions');
 const filesEl = $('files');
 const tray = $('tray');
 
 /* ---------- settings: on this device only, never sent anywhere ---------- */
 const SETTINGS_KEY = 'hako.studio.settings';
-const defaults = { theme: 'washi', modelPaths: [], consented: false, spinner: 'braille' };
+/* theme_picked: a theme chosen here, not the default; side_off: the menu folded away */
+const defaults = { theme: 'terminal', theme_picked: false, modelPaths: [], consented: false, spinner: 'braille', side_off: false, voice: false };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
+/* Before 10-29 every page saved its theme on load, picked or not, so washi (the old
+   default) is in nearly every browser. The default is terminal now: a saved theme
+   counts only once someone picked it. */
+if (!settings.theme_picked) settings.theme = 'terminal';
 function saveSettings() {
 	try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
 }
@@ -1681,8 +1884,8 @@ function saveSettings() {
 /* ---------- themes: applied in the page, instantly ---------- */
 /* THEMES:BEGIN — generated by hako-edit/tools/themes.py from hake.c; do not edit */
 const THEMES = {
-	mithraeum: { bg:'#14130f', panel:'#1b1a16', 'panel-2':'#23211c', line:'#2e2b24', 'line-2':'#3c382f', bone:'#e8e2d2', gold:'#8d99ff', 'gold-dim':'#5d68c2', phos:'#d6c496', dim:'#8a8473', faint:'#5f5a4e', err:'#ff5a4a', ink:'#14130f' },
-	washi: { bg:'#ece7da', panel:'#e4dece', 'panel-2':'#dad3c1', line:'#cfc7b3', 'line-2':'#b9b09a', bone:'#1d1c19', gold:'#2636c4', 'gold-dim':'#6a76c9', phos:'#6b4a2b', dim:'#5f5a4e', faint:'#8a8473', err:'#c2311f', ink:'#ece7da' },
+	mithraeum: { bg:'#0d0c0a', panel:'#151410', 'panel-2':'#1d1b17', line:'#2a2722', 'line-2':'#3a362e', bone:'#e6e0d1', gold:'#e6e0d1', 'gold-dim':'#8c8677', phos:'#bdb6a5', dim:'#8a8473', faint:'#5f5a4e', err:'#ff5a4a', ink:'#0d0c0a' },
+	washi: { bg:'#ece7da', panel:'#e4dece', 'panel-2':'#dad3c1', line:'#cfc7b3', 'line-2':'#b9b09a', bone:'#1d1c19', gold:'#14130f', 'gold-dim':'#6e685a', phos:'#4a463d', dim:'#5f5a4e', faint:'#8a8473', err:'#c2311f', ink:'#ece7da' },
 	dark: { bg:'#1e1e1e', panel:'#252525', 'panel-2':'#2d2d2d', line:'#393939', 'line-2':'#464646', bone:'#d4d4d4', gold:'#569cd6', 'gold-dim':'#427096', phos:'#6a9955', dim:'#6a9955', faint:'#858585', err:'#d0564a', ink:'#1e1e1e' },
 	light: { bg:'#ffffff', panel:'#f6f6f6', 'panel-2':'#ededed', line:'#dddddd', 'line-2':'#cecece', bone:'#1e1e1e', gold:'#0000c8', 'gold-dim':'#5959db', phos:'#008000', dim:'#008000', faint:'#969696', err:'#b3261e', ink:'#ffffff' },
 	gruvbox: { bg:'#282828', panel:'#302f2e', 'panel-2':'#383633', line:'#45433d', 'line-2':'#534f46', bone:'#ebdbb2', gold:'#fb4934', 'gold-dim':'#b13d30', phos:'#b8bb26', dim:'#928374', faint:'#7c6f64', err:'#d0564a', ink:'#282828' },
@@ -1702,18 +1905,66 @@ const THEMES = {
 	kanagawa: { bg:'#1f1f28', panel:'#27262e', 'panel-2':'#2e2e34', line:'#3b3b3e', 'line-2':'#494748', bone:'#dcd7ba', gold:'#957fb8', 'gold-dim':'#6c5d86', phos:'#98bb6c', dim:'#727169', faint:'#54546d', err:'#d0564a', ink:'#1f1f28' }
 };
 /* THEMES:END */
-function applyTheme(name) {
-	const t = THEMES[name] || THEMES.mithraeum;
-	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
-	settings.theme = name;
-	saveSettings();
+/* terminal, the default everywhere: in a terminal it is the profile's own colors;
+   in a browser, a plain neutral that follows the system's light or dark, with none
+   of our inks. Kept out of the generated block above, and it wins over any
+   `terminal` entry there. */
+const darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+const TERMINAL = {
+	light: { bg:'#ffffff', panel:'#f7f7f7', 'panel-2':'#ececec', line:'#e3e3e3', 'line-2':'#cccccc', bone:'#1d1d1f', gold:'#1d1d1f', 'gold-dim':'#8e8e93', phos:'#636366', dim:'#6e6e73', faint:'#9a9aa0', err:'#c9302c', ink:'#ffffff' },
+	dark:  { bg:'#1c1c1e', panel:'#232325', 'panel-2':'#2c2c2e', line:'#38383a', 'line-2':'#48484a', bone:'#e5e5e7', gold:'#e5e5e7', 'gold-dim':'#8e8e93', phos:'#a1a1a6', dim:'#98989d', faint:'#6e6e73', err:'#ff6961', ink:'#1c1c1e' },
+};
+const themeNames = () => ['terminal'].concat(Object.keys(THEMES).filter((n) => n !== 'terminal'));
+/* hex arithmetic for a custom rc theme's derived shades */
+const mix = (a, b, t) => {
+	const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+	if (!/^#[0-9a-f]{6}$/i.test(a) || !/^#[0-9a-f]{6}$/i.test(b)) return a;
+	const x = p(a), y = p(b);
+	return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
+};
+/* A custom theme from the rc (theme.<name>.<slot>=#hex) arrives as state.theme_slots
+   in the shared slot names; the page's own colors are derived from those. */
+function slotsTheme(sl) {
+	const bg = sl.bg || '#1c1c1e', fg = sl.fg || '#e5e5e7';
+	const accent = sl.accent || sl.keyword || sl.ai || fg;
+	return { bg, panel: mix(bg, fg, .04), 'panel-2': mix(bg, fg, .08), line: mix(bg, fg, .14), 'line-2': mix(bg, fg, .22),
+	         bone: fg, gold: accent, 'gold-dim': mix(accent, bg, .4), phos: sl.tool || sl.string || sl.ok || mix(fg, bg, .3),
+	         dim: sl.sys || sl.comment || mix(fg, bg, .4), faint: sl.ghost || sl.meta || mix(fg, bg, .55), err: sl.err || '#ff6961', ink: bg };
 }
-applyTheme(settings.theme);
+function themeVars(name, slots) {
+	if (name === 'terminal' || !name) return TERMINAL[darkMq && darkMq.matches ? 'dark' : 'light'];
+	if (THEMES[name]) return THEMES[name];
+	if (slots && typeof slots === 'object' && Object.keys(slots).length) return slotsTheme(slots);
+	return TERMINAL[darkMq && darkMq.matches ? 'dark' : 'light'];
+}
+let themeShown = '';
+function paintTheme(name, slots) {
+	const t = themeVars(name, slots);
+	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
+	const tc = document.querySelector('meta[name="theme-color"]');
+	if (tc) tc.content = t.bg;
+	themeShown = name || 'terminal';
+}
+/* A pick in settings. The rc's own theme (state.theme) decides unless this browser
+   picked one; under hako --serve a pick is written to the rc, so the two agree. */
+function applyTheme(name, picked) {
+	settings.theme = name;
+	if (picked) settings.theme_picked = true;
+	saveSettings();
+	paintTheme(name);
+}
+function effectiveTheme() {
+	if (state.theme && !(HAKO_WASM_MODE && settings.theme_picked)) return [state.theme, state.theme_slots];
+	return [settings.theme, null];
+}
+paintTheme(settings.theme);
+if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', () => { const [n, sl] = effectiveTheme(); paintTheme(n, sl); });
 
 /* ---------- state ---------- */
 let busy = false;
 let state = { provider: '', model: '', turns: 0, session: '', dir: '', version: '',
-              home: '', places: [], folder: '', root: '' };
+              home: '', places: [], folder: '', root: '',
+              session_name: '', theme: '', theme_slots: null, commands: null, remote: false, update: null, voice: 0, mode: '', yolo: 0 };
 const askBoxes = new Map();
 
 /* ---------- capability handshake ----------
@@ -1725,9 +1976,27 @@ let caps = new Set();
 const isWasm = !!document.querySelector('meta[name="hako-mode"][content="wasm"]') && !REMOTE_ID;
 /* Shown in the header so "is this the new build?" has an answer. */
 const buildId = (document.querySelector('meta[name="hako-build"]') || {}).content || '';
+/* The fields a core may add to /api/state, the init event or a state event
+   (DESIGN 2026-10-29 §4). Every one is optional: an older core sends none of them,
+   and the page then shows what it showed before. */
+function takeState(j) {
+	if (!j || typeof j !== 'object') return;
+	if ('session_name' in j && (j.session_name || '') !== state.session_name) { state.session_name = j.session_name || ''; renderSessions(); }
+	if ('theme' in j) state.theme = j.theme || '';
+	if ('theme_slots' in j) state.theme_slots = j.theme_slots || null;
+	if (Array.isArray(j.commands)) state.commands = j.commands;
+	if ('remote' in j) state.remote = !!j.remote;
+	if ('update' in j) state.update = j.update && j.update.latest ? j.update : null;
+	if ('voice' in j) state.voice = +j.voice || 0;
+	if ('voice_rate' in j) state.voice_rate = +j.voice_rate || 0;
+	if ('mode' in j) state.mode = j.mode || '';
+	if ('yolo' in j) state.yolo = +j.yolo || 0;
+	if ('theme' in j || 'theme_slots' in j) { const [n, sl] = effectiveTheme(); paintTheme(n, sl); }
+	renderChrome();
+}
 async function handshake() {
 	try {
-		const j = await (await fetch('/api/state')).json();
+		const j = await (await fetch('/api/state?for=studio')).json();
 		caps = new Set(j.caps || []);
 		state.provider = j.provider || ''; state.model = j.model || '';
 		state.turns = j.turns || 0; state.dir = j.dir || ''; state.version = j.version || '';
@@ -1735,12 +2004,14 @@ async function handshake() {
 		state.places = j.places || [];
 		state.folder = j.folder || '';
 		state.root = j.root || '';
+		takeState(j);
 		renderMeta();
 		/* A reload mid-prompt: the core still wants an answer, so ask again. */
 		if (j.awaiting_input) askInput({ prompt: j.input_prompt, hidden: j.input_hidden });
 		if (j.busy) setBusy(true);                      /* a reload mid-turn: still running there */
 		else { pendingInput = null; renderPending(); }
 	} catch (e) { caps = new Set(); }
+	renderChrome();
 }
 async function refreshState() {
 	await handshake();
@@ -1748,13 +2019,122 @@ async function refreshState() {
 }
 const closeNav = () => document.body.classList.remove('nav');
 
-function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); live = null; }
+function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); live = null; voice.stop(); setLanding(true); }
 /* The reply as it streams. The finished message replaces it; a tool call or the
    turn's end drops what is left (a withdrawn tool block, never the answer). */
 let live = null;
 function dropLive() { if (live) { live.remove(); live = null; } }
 function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
+/* What makes a conversation: anything but a system notice. Until one arrives the
+   page is the landing, the greeting with the composer under it. */
+const CONVERSATION = /\b(user|model|tool|ask|error)\b/;
+/* Markdown for the model's replies, built as DOM nodes only: nothing the model writes is
+   ever parsed as HTML. Links are http(s) only. Blocks: fences, headings, lists (task boxes,
+   one level of nesting), quotes, rules, tables, paragraphs with their line breaks kept. */
+const MD_INLINE = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|~~([^~\n]+?)~~|\*([^*\s][^*\n]*?)\*|(^|[^\w])_([^_\s][^_\n]*?)_(?!\w)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]*[^\s<.,;:!?)\]'"])/g;
+function mdInline(parent, text) {
+	let at = 0, m;
+	const re = new RegExp(MD_INLINE.source, 'g');
+	const el = (tag, inner, code) => { const e = document.createElement(tag); if (code) e.textContent = inner; else mdInline(e, inner); parent.appendChild(e); return e; };
+	while ((m = re.exec(text))) {
+		let start = m.index;
+		if (m[6] !== undefined) start += m[6].length;          /* the char before _x_ stays text */
+		if (start > at) parent.appendChild(document.createTextNode(text.slice(at, start)));
+		if (m[1] !== undefined) el('code', m[1], true);
+		else if (m[2] !== undefined || m[3] !== undefined) el('strong', m[2] !== undefined ? m[2] : m[3]);
+		else if (m[4] !== undefined) el('del', m[4]);
+		else if (m[5] !== undefined) el('em', m[5]);
+		else if (m[7] !== undefined) el('em', m[7]);
+		else {
+			const a = el('a', m[8] !== undefined ? m[8] : m[10], m[8] === undefined);
+			a.href = m[8] !== undefined ? m[9] : m[10]; a.target = '_blank'; a.rel = 'noopener noreferrer';
+		}
+		at = re.lastIndex;
+	}
+	if (at < text.length) parent.appendChild(document.createTextNode(text.slice(at)));
+}
+function mdLines(parent, lines) {                 /* a paragraph or a cell: inline, breaks kept */
+	lines.forEach((l, i) => { if (i) parent.appendChild(document.createElement('br')); mdInline(parent, l); });
+}
+function md(text) {
+	const out = document.createDocumentFragment();
+	const L = String(text).replace(/\r\n?/g, '\n').split('\n');
+	const item = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
+	const row = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+	let para = [];
+	const flush = () => { if (para.length) { const p = document.createElement('p'); mdLines(p, para); out.appendChild(p); para = []; } };
+	for (let i = 0; i < L.length; i++) {
+		const l = L[i];
+		let f = /^\s*(```|~~~)\s*([\w+#.-]*)/.exec(l);
+		if (f) {
+			flush();
+			const body = [];
+			for (i++; i < L.length && !L[i].trim().startsWith(f[1]); i++) body.push(L[i]);
+			const pre = document.createElement('pre'), code = document.createElement('code');
+			if (f[2]) code.className = 'lang-' + f[2];
+			code.textContent = body.join('\n'); pre.appendChild(code); out.appendChild(pre);
+			continue;
+		}
+		if (!l.trim()) { flush(); continue; }
+		if ((f = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(l))) {
+			flush(); const h = document.createElement('h' + f[1].length); mdInline(h, f[2]); out.appendChild(h); continue;
+		}
+		if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(l)) { flush(); out.appendChild(document.createElement('hr')); continue; }
+		if (/^\s{0,3}>/.test(l)) {
+			flush(); const q = [];
+			for (; i < L.length && /^\s{0,3}>/.test(L[i]); i++) q.push(L[i].replace(/^\s{0,3}>\s?/, ''));
+			i--; const b = document.createElement('blockquote'); b.appendChild(md(q.join('\n'))); out.appendChild(b); continue;
+		}
+		if (l.includes('|') && i + 1 < L.length && L[i + 1].includes('|') && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(L[i + 1])) {
+			flush();
+			const t = document.createElement('table'), hr = document.createElement('tr');
+			row(l).forEach((c) => { const th = document.createElement('th'); mdInline(th, c); hr.appendChild(th); });
+			t.appendChild(hr);
+			for (i += 2; i < L.length && L[i].includes('|') && L[i].trim(); i++) {
+				const tr = document.createElement('tr');
+				row(L[i]).forEach((c) => { const td = document.createElement('td'); mdInline(td, c); tr.appendChild(td); });
+				t.appendChild(tr);
+			}
+			i--; out.appendChild(t); continue;
+		}
+		if ((f = item.exec(l))) {
+			flush();
+			const root = document.createElement(/\d/.test(f[2]) ? 'ol' : 'ul');
+			const base = f[1].length;
+			let list = root, last = null;
+			for (; i < L.length; i++) {
+				const g = item.exec(L[i]);
+				if (!g) {
+					if (L[i].trim() && last && /^\s{2,}/.test(L[i])) { last.appendChild(document.createElement('br')); mdInline(last, L[i].trim()); continue; }
+					break;
+				}
+				const deep = g[1].length > base + 1;
+				if (!deep && /\d/.test(g[2]) !== (root.tagName === 'OL')) break;   /* 1. after - starts a new list */
+				if (deep && last) {
+					if (list === root) { list = document.createElement(/\d/.test(g[2]) ? 'ol' : 'ul'); last.appendChild(list); }
+				} else list = root;
+				const li = document.createElement('li');
+				const task = /^\[([ xX])\]\s+(.*)$/.exec(g[3]);
+				if (task) { li.className = 'task'; li.appendChild(document.createTextNode(task[1] === ' ' ? '○ ' : '✓ ')); mdInline(li, task[2]); }
+				else mdInline(li, g[3]);
+				list.appendChild(li);
+				if (list === root) last = li;
+			}
+			i--; out.appendChild(root); continue;
+		}
+		para.push(l);
+	}
+	flush();
+	return out;
+}
+function addModel(text) {                        /* a reply: markdown, not raw text */
+	const el = add('turn model md', 'hako', '');
+	el.appendChild(md(text));
+	return el;
+}
+
 function add(cls, who, text) {
+	if (CONVERSATION.test(cls)) setLanding(false);
 	const stick = atBottom();
 	const el = document.createElement('div');
 	el.className = cls;
@@ -1779,16 +2159,12 @@ function add(cls, who, text) {
 	return el;
 }
 let metaHold = 0;                     /* a flashStatus word is showing until then */
+/* The header's status word: the turn, or a word for a moment. Provider and model
+   live under the composer now. */
 function renderMeta() {
 	if (Date.now() < metaHold) return;
-	meta.textContent = '';
-	if (state.provider) {
-		const b = document.createElement('b');
-		b.textContent = state.provider + (state.model ? '/' + state.model : '');
-		meta.appendChild(b);
-	}
-	if (state.turns) meta.appendChild(document.createTextNode(' · turn ' + state.turns));
-	if (!meta.textContent) meta.textContent = 'ready';
+	meta.textContent = state.turns ? 'turn ' + state.turns : '';
+	renderChrome();
 }
 /* ---------- thinking indicator ----------
    A local turn can run for minutes with nothing streamed back, so without this
@@ -2346,7 +2722,9 @@ function consentNotice(onOk) {
    Now: walk anywhere, tap a file to attach it, open the folder as the project,
    or pull a file off the device you are holding. */
 async function openBrowser() {
-	const m = modal('choose a working folder');
+	/* a code session lives in its folder: its files, never another folder */
+	const inSession = !!REMOTE_ID;
+	const m = modal(inSession ? 'files' : 'choose a working folder');
 	/* A directory picker is a navigation surface, not a menu — give it the whole
 	   screen so a deep path is browsable with a thumb. */
 	m.box.classList.add('sheet');
@@ -2405,7 +2783,7 @@ async function openBrowser() {
 				: 'This web instance of hako studio runs entirely in your browser, and '
 				  + 'uses your browser\u2019s storage to keep your settings, your sessions '
 				  + 'and the files the agent writes.<br><br>'
-				  + 'Its working directory is <code>' + (state.dir || '/workspace') + '</code> '
+				  + 'Its working directory is <code>' + (state.dir || '/workspace').replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';') + '</code> '
 				  + '\u2014 a folder inside that storage, not a folder on your device. It will '
 				  + 'not appear in Files, and clearing this site\u2019s data erases it. Save '
 				  + 'anything you want to keep from the files list.<br><br>'
@@ -2464,6 +2842,7 @@ async function openBrowser() {
 
 		openBtn.textContent = (path === state.dir) ? 'current project' : 'open this folder';
 		openBtn.disabled = (path === state.dir);
+		if (inSession) m.title.textContent = 'files \u00b7 ' + (path.split('/').filter(Boolean).pop() || path);
 
 		const dirs = (j.dirs || []).sort();
 		const files = (j.files || []).sort((a, b) => a.name.localeCompare(b.name));
@@ -2510,9 +2889,10 @@ async function openBrowser() {
 			const savable = isWasm && !state.folder && caps.has('save');
 			files.slice(0, 40).forEach((f) => {
 				const full = (path === '/' ? '' : path) + '/' + f.name;
-				const row = optionRow(f.name, fmtSize(f.bytes), savable ? 'save' : '',
-					savable ? () => saveOut(full, f.name) : () => {});
-				if (!savable) row.disabled = true;
+				/* on a computer the file is already where the agent can read it: a tap names it in the next message */
+				const rel = state.dir && full.startsWith(state.dir.replace(/\/$/, '') + '/') ? full.slice(state.dir.replace(/\/$/, '').length + 1) : full;
+				const row = optionRow(f.name, fmtSize(f.bytes), savable ? 'save' : 'add',
+					savable ? () => saveOut(full, f.name) : () => { m.close(); attach(rel); });
 				m.body.appendChild(withRemove(row, full, f.name));
 			});
 			if (files.length > 40) m.body.appendChild(Object.assign(document.createElement('div'),
@@ -2621,7 +3001,8 @@ async function openBrowser() {
 	const foot = [g];
 	if (sysBtn) foot.push(sysBtn);
 	if (mkdirBtn) foot.push(mkdirBtn);
-	foot.push(mb('home', '', () => draw(state.home || '~')), mb('close', '', m.close), openBtn);
+	foot.push(mb('home', '', () => draw(state.home || '~')), mb('close', '', m.close));
+	if (!inSession) foot.push(openBtn);
 	m.foot.append(...foot);
 	await draw(path);
 }
@@ -2641,21 +3022,25 @@ function openSettings() {
 	/* Tapping through themes previews them; closing settings keeps the last one,
 	   says so in the status line, and (under --serve) keeps the CLI in step. */
 	m.body.appendChild(groupLabel('theme'));
-	const themeWas = settings.theme, themeRows = [];
+	const themeWas = themeShown, themeRows = [];
 	m.onclose = () => {
-		if (settings.theme === themeWas) return;
+		if (themeShown === themeWas) return;
 		if (!HAKO_WASM_MODE) post('/api/theme', settings.theme);
 		flashStatus('theme: ' + settings.theme);
 	};
-	Object.keys(THEMES).forEach((name) => {
-		const t = THEMES[name];
-		const b = optionRow(name, '', '', () => {
-			applyTheme(name);
+	/* terminal first (the default), then the presets, then the rc's own theme if it is a custom one */
+	const names = themeNames();
+	if (state.theme && !names.includes(state.theme) && state.theme_slots) names.push(state.theme);
+	names.forEach((name) => {
+		const t = themeVars(name, name === state.theme ? state.theme_slots : null);
+		const b = optionRow(name, name === 'terminal' ? 'follows light or dark' : '', '', () => {
+			applyTheme(name, true);
+			if (name === state.theme && state.theme_slots) paintTheme(name, state.theme_slots);
 			for (const [n, row, label] of themeRows) {
 				row.classList.toggle('sel', n === name);
 				label.nodeValue = (n === name ? '\u25ce ' : '  ') + n;
 			}
-		}, settings.theme === name);
+		}, themeShown === name);
 		themeRows.push([name, b, b.firstChild]);
 		['bg', 'gold', 'phos', 'bone'].reverse().forEach((k) => {
 			const sw = document.createElement('span');
@@ -2665,6 +3050,17 @@ function openSettings() {
 		});
 		m.body.appendChild(b);
 	});
+
+	/* Read aloud: the device's own voices (speechSynthesis), nothing leaves it. */
+	if (voice.ok) {
+		m.body.appendChild(groupLabel('voice'));
+		const rc = state.voice === 1;
+		m.body.appendChild(optionRow(settings.voice || rc ? 'read replies aloud: on' : 'read replies aloud: off',
+			rc ? 'on in your .hakorc (voice=1)' : 'uses this device\u2019s own voices; nothing is sent anywhere', '', () => {
+				settings.voice = !settings.voice; saveSettings(); voice.stop();
+				m.close(); openSettings();
+			}, settings.voice || rc));
+	}
 
 	m.body.appendChild(groupLabel('thinking indicator'));
 	Object.keys(SPINNERS).forEach((name) => {
@@ -2701,6 +3097,15 @@ function openSettings() {
 	m.body.appendChild(addWrap);
 	}
 
+	/* hako on a computer: start this folder over (fresh session state, same agent) */
+	if (!isWasm && caps.has('open')) {
+		m.body.appendChild(groupLabel('this folder'));
+		m.body.appendChild(optionRow('reload this folder', 'fresh session state, same agent', '', async () => {
+			m.close(); clearLog(); add('turn system', '', 'reloading this folder\u2026');
+			await post('/api/restart', ''); setBusy(false);
+		}));
+	}
+
 	m.body.appendChild(groupLabel('your data'));
 	const priv = document.createElement('div');
 	priv.className = 'note';
@@ -2711,7 +3116,8 @@ function openSettings() {
 	m.body.appendChild(optionRow('forget settings on this device', '', '', () => {
 		try { localStorage.removeItem(SETTINGS_KEY); } catch (e) {}
 		settings = Object.assign({}, defaults);
-		applyTheme(settings.theme);
+		const [n, sl] = effectiveTheme(); paintTheme(n, sl);
+		setSide(false);
 		m.close();
 	}));
 
@@ -2783,7 +3189,7 @@ async function renderHistory(id) {
 		const j = await r.json();
 		(j.messages || []).forEach((msg) => {
 			if (msg.role === 'user') {
-				if (msg.content) add('turn user', 'you', msg.content);
+				if (msg.content) { add('turn user', 'you', msg.content); if (!/^[:/]/.test(msg.content)) hist.push(msg.content); }
 				return;
 			}
 			if (msg.role === 'assistant') {
@@ -2792,7 +3198,7 @@ async function renderHistory(id) {
 				   chips reads like two different applications. */
 				const { prose, calls } = replayAssistant(msg.content);
 				calls.forEach((c) => add('tool', '', '→ ' + c.name + '(' + (c.subject || '') + ')'));
-				if (prose) add('turn model', 'hako', prose);
+				if (prose) addModel(prose);
 				return;
 			}
 			if (msg.role === 'tool') {
@@ -2823,6 +3229,9 @@ async function resumeSession(id) {
    is never touched, so the CLI keeps reading it unchanged. Empty name restores
    the first-message default. */
 function renameSession(s) {
+	/* hako on a computer names the open session itself (:name), so the terminal and
+	   every page show the same name; the state that follows carries it back here */
+	const named = isCodeCore() && s.id === state.session;
 	const m = modal('rename session');
 	const n = document.createElement('div');
 	n.className = 'note';
@@ -2832,14 +3241,21 @@ function renameSession(s) {
 	const wrap = document.createElement('div');
 	wrap.style.padding = '.35rem .55rem';
 	const inp = document.createElement('input');
-	inp.value = s.title || '';
+	inp.value = (named && state.session_name) || s.title || '';
 	inp.maxLength = 200;
 	wrap.appendChild(inp);
 	m.body.appendChild(wrap);
 
 	const apply = async () => {
 		m.close();
-		const r = await post('/api/session/rename', s.id + '\n' + inp.value.trim());
+		const v = inp.value.trim().replace(/\s+/g, ' ');
+		if (named) {
+			await quietSlash(':name ' + (v || 'none'));
+			state.session_name = v;                 /* the next state event confirms it */
+			renderSessions(); renderChrome();
+			return;
+		}
+		const r = await post('/api/session/rename', s.id + '\n' + v);
 		if (r && r.ok) loadSessions();
 		else add('turn error', '', 'could not rename ' + s.id);
 	};
@@ -2877,91 +3293,84 @@ function when(ts) {
 	if (now - ts < 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
+/* This folder's sessions (in the browser, this browser's chats), newest first. */
+let sessionList = [];
 async function loadSessions() {
 	try {
 		const r = await fetch('/api/sessions');
 		const j = await r.json();
-		state.dir = j.dir || '';
-		dirEl.textContent = state.dir;
-		sessionsEl.textContent = '';
-		(j.sessions || []).sort((a, b) => b.mtime - a.mtime).forEach((s) => {
-			const row = document.createElement('div');
-			row.className = 'sessrow';
-
-			const b = document.createElement('button');
-			b.className = 'sess' + (s.id === state.session ? ' cur' : '') + (HAKO_WASM_MODE ? (REMOTE_ID ? ' k-code' : ' k-chat') : '');
-			b.title = s.id;
-			b.textContent = s.title || '(empty)';
-			const w = document.createElement('span');
-			w.className = 'when';
-			w.textContent = s.id.slice(0, 8) + ' · ' + when(s.mtime);
-			b.appendChild(w);
-			b.addEventListener('click', () => { closeNav(); resumeSession(s.id); });
-
-			const ren = document.createElement('button');
-			ren.className = 'act ren';
-			ren.title = 'rename this session';
-			ren.textContent = '✎';
-			ren.addEventListener('click', (e) => { e.stopPropagation(); renameSession(s); });
-
-			const del = document.createElement('button');
-			del.className = 'act del';
-			del.title = 'delete this session';
-			del.textContent = '×';
-			del.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete(s); });
-
-			row.append(b, ren, del);
-			sessionsEl.appendChild(row);
-		});
-		if (!(j.sessions || []).length)
-			sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no sessions in this folder yet' }));
+		state.dir = j.dir || state.dir || '';
+		/* A session with no prompt in it is noise: every page that opens makes one. */
+		sessionList = (j.sessions || []).filter((s) => s.title || (s.id === state.session && state.session_name))
+			.sort((a, b) => b.mtime - a.mtime);
+		renderSessions();
 	} catch (e) {}
+	renderChrome();
 	loadFiles();
 }
+const isCodeCore = () => !HAKO_WASM_MODE || !!REMOTE_ID;    /* hako on a computer, not this browser's own */
+function renderSessions() {
+	sessionsEl.textContent = '';
+	sessionList.forEach((s) => {
+		const cur = s.id === state.session;
+		const row = document.createElement('div');
+		row.className = 'sessrow';
 
-/* What the agent has written, where you can reach it. In the browser build the
-   working directory is not a place any file manager can open, so a file is only
-   really yours once it has been saved out. */
+		const b = document.createElement('button');
+		b.className = 'sess' + (cur ? ' cur' : '') + (HAKO_WASM_MODE ? (REMOTE_ID ? ' k-code' : ' k-chat') : '');
+		b.title = s.id;
+		const nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = (cur && state.session_name) || s.title;
+		const w = document.createElement('span');
+		w.className = 'when';
+		w.textContent = when(s.mtime);
+		b.append(nm, w);
+		b.addEventListener('click', () => { closeNav(); resumeSession(s.id); });
+
+		const ren = document.createElement('button');
+		ren.className = 'act ren';
+		ren.title = 'rename this session';
+		ren.textContent = '✎';
+		ren.addEventListener('click', (e) => { e.stopPropagation(); renameSession(s); });
+
+		const del = document.createElement('button');
+		del.className = 'act del';
+		del.title = 'delete this session';
+		del.textContent = '×';
+		del.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete(s); });
+
+		row.append(b, ren, del);
+		sessionsEl.appendChild(row);
+	});
+	if (!sessionList.length)
+		sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: REMOTE_ID || !HAKO_WASM_MODE ? 'no chats in this folder yet' : 'no chats yet' }));
+	applySearch();
+}
+
+/* The working folder's newest files, as cards on the landing. A tap puts the
+   file on the tray, so the next message names it. */
 async function loadFiles() {
 	if (!filesEl) return;
 	try {
+		if (document.body.classList.contains('codeland')) { filesEl.textContent = ''; $('files-label').hidden = true; return; }
 		const j = await (await fetch('/api/dirs?path=' + encodeURIComponent(state.dir || '.'))).json();
-		const files = (j.files || []).sort((a, b) => a.name.localeCompare(b.name));
+		let files = (j.files || []).filter((f) => f.name && f.name[0] !== '.');
+		files = files.some((f) => f.mtime) ? files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+		                                   : files.sort((a, b) => a.name.localeCompare(b.name));
 		filesEl.textContent = '';
-		if (!files.length) {
-			filesEl.appendChild(Object.assign(document.createElement('div'),
-				{ className: 'note', textContent: 'nothing written yet' }));
-			return;
-		}
-		files.slice(0, 60).forEach((f) => {
-			const row = document.createElement('div');
-			row.className = 'sessrow';
-			const b = document.createElement('button');
-			b.className = 'sess';
-			b.title = f.name;
-			b.textContent = f.name;
-			const full = ((state.dir === '/' ? '' : state.dir) || '') + '/' + f.name;
-			/* Native runs against a real disk, where the file is already reachable. */
-			if (isWasm) b.addEventListener('click', () => saveOut(full, f.name));
-			else b.disabled = true;
-			row.appendChild(b);
-			const sz = document.createElement('span');
-			sz.className = 'sub';
-			sz.textContent = fmtSize(f.bytes || 0);
-			row.appendChild(sz);
-			if (isWasm && !state.folder) {
-				const x = document.createElement('button');
-				x.className = 'act del';
-				x.textContent = '×';
-				x.title = 'delete ' + f.name;
-				x.addEventListener('click', async () => {
-					if (!confirm('Delete ' + f.name + '? This cannot be undone.')) return;
-					await post('/api/file/delete', full);
-					loadFiles();
-				});
-				row.appendChild(x);
-			}
-			filesEl.appendChild(row);
+		$('files-label').hidden = !files.length;
+		files.slice(0, 8).forEach((f) => {
+			const c = document.createElement('button');
+			c.type = 'button';
+			c.className = 'card';
+			c.title = 'add ' + f.name + ' to your message';
+			const nm = Object.assign(document.createElement('span'), { className: 'nm', textContent: f.name });
+			const sub = Object.assign(document.createElement('span'), { className: 'sub',
+				textContent: fmtSize(f.bytes || 0) + (f.mtime ? ' \u00b7 ' + when(f.mtime) : '') });
+			c.append(nm, sub);
+			c.addEventListener('click', () => attach(f.name));
+			filesEl.appendChild(c);
 		});
 	} catch (e) {}
 }
@@ -2989,6 +3398,7 @@ es.onmessage = (ev) => {
 	switch (m.type) {
 		case 'init':
 			state.provider = m.provider || ''; state.model = m.model || ''; state.turns = m.turns || 0;
+			takeState(m);
 			renderMeta(); loadSessions();
 			break;
 		case 'delta': {
@@ -3000,12 +3410,21 @@ es.onmessage = (ev) => {
 		}
 		case 'message':
 			dropLive();
-			if (m.role === 'user') { add('turn user', 'you', m.text || ''); setBusy(true); break; }
+			if (m.role === 'user') {
+				if (quietEcho(m.text)) break;               /* a command this page sent for a menu pick */
+				voice.stop();
+				add('turn user', 'you', m.text || ''); setBusy(true);
+				renderChrome();
+				break;
+			}
 			if (m.role === 'system') {
 				sniffState(m.text || '');                       /* always watch for state lines */
+				if (quietReply(m.text)) break;
 				add('turn system', '', m.text || '');
 			} else {
-				add('turn model', 'hako', m.text || '');
+				const el = addModel(m.text || '');
+				addSay(el, m.text || '');
+				if (voice.on() && !replaying) voice.speak(m.text || '', el.querySelector('.say'));
 			}
 			break;
 		case 'input_request':
@@ -3016,8 +3435,10 @@ es.onmessage = (ev) => {
 		case 'tool_request': askApproval(m); break;
 		case 'choice_request': askChoice(m); break;
 		case 'state':                       /* a menu pick: the status line, never the chat */
-			state.provider = m.provider || ''; state.model = m.model || '';
-			renderMeta();
+			if ('provider' in m) state.provider = m.provider || '';
+			if ('model' in m) state.model = m.model || '';
+			takeState(m);
+			renderMeta(); renderSessions();
 			break;
 		case 'choice_decision': {
 			const box = askBoxes.get('c' + m.id);
@@ -3050,6 +3471,399 @@ es.onmessage = (ev) => {
 	}
 };
 
+/* ---------- the page around the chat: wordmark, title, indicators, chips ---------- */
+/* HAKO and CODE in Dela Gothic One (OFL), as outlines: no font file to ship.
+   A faint second impression of the same ink behind, off register, like the icon. */
+const WORDS = {
+	hako: [3838, 'M878 -726Q871 -557 871 -363Q871 -169 878 0H643V-272H275V0H40Q48 -194 48 -363Q48 -532 40 -726H275V-454H643V-726ZM1619 0Q1600 -57 1568 -143H1249L1199 0H948L1228 -726H1596L1878 0ZM1511 -299Q1473 -404 1433 -509L1409 -574Q1374 -483 1306 -299ZM2483 0Q2436 -85 2327 -260L2210 -144V0H1961Q1969 -194 1969 -363Q1969 -532 1961 -726H2210V-433Q2394 -615 2472 -726H2796L2481 -414Q2551 -316 2638 -201Q2726 -86 2797 0ZM2907 -369Q2907 -547 3014 -647Q3122 -747 3352 -747Q3583 -747 3690 -647Q3798 -547 3798 -369Q3798 -188 3691 -89Q3584 10 3352 10Q3123 10 3015 -90Q2907 -189 2907 -369ZM3561 -369Q3561 -457 3512 -500Q3463 -543 3352 -543Q3242 -543 3193 -500Q3144 -457 3144 -369Q3144 -280 3193 -237Q3242 -194 3352 -194Q3463 -194 3512 -236Q3561 -279 3561 -369Z'],
+	code: [3764, 'M40 -360Q40 -539 147 -643Q254 -747 480 -747Q796 -747 903 -530Q813 -499 692 -437Q663 -493 600 -520Q538 -547 473 -547Q377 -547 330 -496Q283 -446 283 -372Q283 -292 334 -242Q384 -191 488 -191Q571 -191 620 -218Q669 -246 692 -306Q774 -262 902 -207Q852 -86 735 -38Q618 10 480 10Q254 10 147 -86Q40 -182 40 -360ZM1013 -369Q1013 -547 1120 -647Q1228 -747 1458 -747Q1689 -747 1796 -647Q1904 -547 1904 -369Q1904 -188 1797 -89Q1690 10 1458 10Q1229 10 1121 -90Q1013 -189 1013 -369ZM1667 -369Q1667 -457 1618 -500Q1569 -543 1458 -543Q1348 -543 1299 -500Q1250 -457 1250 -369Q1250 -280 1299 -237Q1348 -194 1458 -194Q1569 -194 1618 -236Q1667 -279 1667 -369ZM2827 -368Q2827 -257 2777 -174Q2727 -91 2627 -46Q2527 0 2381 0Q2292 0 2200 0Q2108 0 2014 -1Q2022 -198 2022 -368Q2022 -540 2014 -727Q2133 -737 2334 -737Q2522 -737 2631 -692Q2740 -646 2784 -566Q2827 -485 2827 -368ZM2409 -199Q2502 -199 2533 -244Q2564 -289 2564 -368Q2564 -444 2532 -491Q2499 -538 2409 -538Q2312 -538 2264 -532V-199ZM3173 -183Q3553 -185 3724 -194Q3717 -153 3716 -110Q3714 -66 3714 0H2937Q2945 -194 2945 -363Q2945 -532 2937 -726H3714V-545H3173V-449Q3221 -448 3315 -448Q3474 -448 3644 -454V-282Q3474 -288 3315 -288Q3221 -288 3173 -287Z']
+};
+const wordSvg = (w) => {
+	const [wd, d] = WORDS[w];
+	return '<svg viewBox="-12 -770 ' + (wd + 70) + ' 800" aria-hidden="true"><path class="off" transform="translate(36 24)" d="' + d + '"/><path class="on" d="' + d + '"/></svg>';
+};
+/* the box (コ) mark, the same one hako's terminal and icon carry */
+const MARK = '<svg viewBox="0 0 512 512" aria-hidden="true"><g class="mk-off" transform="translate(14 9)"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g><g class="mk-on"><path transform="translate(81.1 387.6) scale(0.3513 -0.3513)" d="M81 505V726H925V23H647V44H71V279H650V505Z"/></g></svg>';
+const ICO = {
+	folder: '<svg class="i" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h3.8l2 2h7.2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
+	model: '<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5 19.5 8v8L12 20.5 4.5 16V8z"/><path d="M12 12 19.5 8M12 12v8.5M12 12 4.5 8"/></svg>',
+	mode: '<svg class="i" viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.5c0 4.2-3 7.4-7 9-4-1.6-7-4.8-7-9V6z"/></svg>',
+	device: '<svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M8.5 20h7M12 16v4"/></svg>',
+	speak: '<svg class="i" viewBox="0 0 24 24"><path d="M4.5 9.5v5h3.5l5 4v-13l-5 4z"/><path d="M16 9.2a4 4 0 0 1 0 5.6M18.6 6.8a7.5 7.5 0 0 1 0 10.4"/></svg>',
+	stop: '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+};
+const iconEl = (k) => { const t = document.createElement('template'); t.innerHTML = ICO[k]; return t.content.firstChild; };
+
+let chromeWord = '';
+const inCode = () => !HAKO_WASM_MODE || !!REMOTE_ID || document.body.classList.contains('code');
+const codeLanding = () => document.body.classList.contains('codeland');
+function currentTitle() {
+	if (state.session_name) return state.session_name;
+	const s = sessionList.find((x) => x.id === state.session);
+	return s ? s.title : '';
+}
+function renderChrome() {
+	const word = inCode() ? 'code' : 'hako';
+	if (word !== chromeWord) {
+		chromeWord = word;
+		for (const id of ['wordmark', 'hmark']) {
+			const el = $(id);
+			if (!el) continue;
+			el.innerHTML = wordSvg(word);
+			if (el.setAttribute) el.setAttribute('aria-label', word);
+		}
+		document.title = word === 'code' ? 'hako · code' : 'hako';
+		renderGreeting();
+	}
+	const t = $('title');
+	if (t) t.textContent = landing ? '' : currentTitle();
+	renderInd();
+	renderPills();
+}
+/* quiet, in the header: this session is shared (:remote on), a newer hako is out */
+function renderInd() {
+	const el = $('ind');
+	if (!el) return;
+	el.textContent = '';
+	if (state.remote) {
+		const s = document.createElement('span');
+		s.className = 'on';
+		s.textContent = 'remote';
+		s.title = REMOTE_ID ? 'a code session on your computer, through the relay' : 'shared with your devices until :remote off';
+		el.appendChild(s);
+	}
+	const u = state.update;
+	if (u && u.latest) {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.textContent = '↑ ' + u.latest;
+		b.title = 'hako ' + u.latest + ' is out' + (u.current ? ' (this is ' + u.current + ')' : '') + '. :update installs it';
+		b.addEventListener('click', () => { input.value = ':update'; input.focus(); syncInput(); });
+		el.appendChild(b);
+	}
+}
+/* under the composer: the folder, the model, the mode. Each opens its picker. */
+function pill(ico, text, title, fn, off) {
+	const b = document.createElement('button');
+	b.type = 'button';
+	b.className = 'pill';
+	b.title = title || text;
+	if (ico) b.appendChild(iconEl(ico));
+	b.appendChild(Object.assign(document.createElement('span'), { textContent: text }));
+	if (fn) b.addEventListener('click', fn); else b.disabled = !!off;
+	return b;
+}
+function renderPills() {
+	const el = $('pills');
+	if (!el) return;
+	el.textContent = '';
+	if (codeLanding()) {
+		const c = codeList.find((x) => x.id === codePick);
+		if (c) el.append(pill('device', c.host, c.dir || c.host), pill('folder', c.name, c.dir));
+		return;
+	}
+	const folder = state.folder || (state.dir ? state.dir.split('/').filter(Boolean).pop() : '') || '';
+	el.appendChild(pill('folder', folder || 'no folder', state.dir || 'pick a folder', () => { closeNav(); openBrowser(); }));
+	el.appendChild(pill('model', state.model || (state.provider && state.provider !== 'none' ? state.provider : 'pick a model'),
+		(state.provider || 'no provider') + (state.model ? ' / ' + state.model : ''), () => openModelPicker()));
+	if (caps.has('approve')) {
+		const mode = state.mode || (state.yolo ? 'auto' : 'ask');
+		el.appendChild(pill('mode', mode, 'ask: every tool asks first · plan: no changes · auto: tools run without asking', openModePicker));
+	}
+}
+function openModePicker() {
+	const m = modal('mode');
+	const cur = state.mode || (state.yolo ? 'auto' : 'ask');
+	const MODES = [['ask', 'every tool asks you first'], ['plan', 'reads and plans, changes nothing'], ['auto', 'tools run without asking']];
+	for (const [k, d] of MODES) {
+		const b = optionRow(k, REMOTE_ID && k === 'auto' ? 'only at the computer itself' : d, '', async () => {
+			m.close();
+			state.mode = k; state.yolo = k === 'auto' ? 1 : 0; renderPills();
+			await quietSlash(':mode ' + k);
+		}, k === cur);
+		if (REMOTE_ID && k === 'auto') b.disabled = true;
+		m.body.appendChild(b);
+	}
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('close', '', m.close));
+}
+
+/* ---------- the landing: a greeting that knows the hour ---------- */
+const GREETINGS = {
+	dawn:      ['first light. what are we making?', 'cautes lifts his torch. where do we start?', 'early. the cave is quiet'],
+	morning:   ['good morning. what’s on the bench?', 'morning. what are we building?', 'a fresh day, an open folder'],
+	afternoon: ['good afternoon. where were we?', 'afternoon. what needs doing?', 'the sun’s high. what’s next?'],
+	evening:   ['good evening. one more thing?', 'cautopates lowers his torch. what’s left?', 'lamps on. what are we working on?'],
+	night:     ['late again. what’s keeping you up?', 'night shift. what are we chasing?', 'the stars turn. what’s on your mind?'],
+};
+const partOfDay = (h) => h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : h >= 17 && h < 22 ? 'evening' : 'night';
+let landing = false, wantSlide = false, greetPick = Math.random();
+let codeList = [], codePick = '';
+const PLACEHOLDER = 'ask anything; : or / for commands';
+function renderGreeting() {
+	const g = $('greet');
+	if (!g) return;
+	const now = new Date(), part = partOfDay(now.getHours()), list = GREETINGS[part];
+	g.innerHTML = MARK;
+	g.appendChild(Object.assign(document.createElement('span'), { textContent: list[Math.floor(greetPick * list.length) % list.length] }));
+	g.dataset.part = part;
+	const sub = $('greet-sub');
+	if (sub) sub.textContent = codeLanding() ? (codeList.length ? 'pick a folder on one of your computers, then say what to do' : '') : '';
+	renderChooser();
+}
+/* On: the greeting with the composer centered under it. Off: the conversation,
+   the composer at the foot. A message sent from the landing slides it down. */
+function setLanding(on) {
+	if (on === landing) return;
+	const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const slide = !on && wantSlide && !reduce && form.animate;
+	const before = slide ? form.getBoundingClientRect().top : 0;
+	landing = on;
+	wantSlide = false;
+	document.body.classList.toggle('landing', on);
+	if (on) { greetPick = Math.random(); renderGreeting(); }
+	renderChrome();
+	if (slide) {
+		const after = form.getBoundingClientRect().top;
+		if (Math.abs(after - before) > 4)
+			form.animate([{ transform: 'translateY(' + (before - after) + 'px)' }, { transform: 'none' }],
+			             { duration: 280, easing: 'cubic-bezier(.2,.7,.2,1)' });
+	}
+	if (!on) log.scrollTop = log.scrollHeight;
+}
+setLanding(true);
+
+/* code, before a session is open: the open code sessions to pick from, add a device */
+function renderChooser() {
+	const el = $('chooser');
+	if (!el) return;
+	el.hidden = !codeLanding();
+	if (el.hidden) { input.placeholder = PLACEHOLDER; return; }
+	el.textContent = '';
+	if (!codeList.some((c) => c.id === codePick)) codePick = (codeList.find((c) => c.id === settings.code_pick) || codeList[0] || {}).id || '';
+	if (!codeList.length) el.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+		textContent: 'no code sessions open. on a computer, run hako in the folder you want to reach, then :remote on.' }));
+	for (const c of codeList) {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.className = 'pick' + (c.id === codePick ? ' sel' : '');
+		b.appendChild(iconEl('device'));
+		const nm = Object.assign(document.createElement('span'), { className: 'nm', textContent: c.name });
+		nm.appendChild(Object.assign(document.createElement('span'), { className: 'sub', textContent: '  ' + c.host }));
+		b.append(nm, Object.assign(document.createElement('span'), { className: 'ok', textContent: '✓' }));
+		b.title = c.host + (c.dir ? ' · ' + c.dir : '');
+		b.addEventListener('click', () => { codePick = c.id; settings.code_pick = c.id; saveSettings(); renderChooser(); renderPills(); input.focus(); });
+		el.appendChild(b);
+	}
+	const add = document.createElement('button');
+	add.type = 'button';
+	add.className = 'pick';
+	add.append(Object.assign(document.createElement('span'), { className: 'nm', textContent: '+ add a device' }));
+	add.addEventListener('click', () => window.hakoAccount.addDevice());
+	el.appendChild(add);
+	input.placeholder = codePick ? 'what should hako do in ' + (codeList.find((c) => c.id === codePick) || {}).name + '?' : 'pick a code session first';
+}
+window.hakoCodeLanding = (list) => {
+	codeList = list || [];
+	chromeWord = '';                  /* the wordmark too: code */
+	renderChrome(); loadFiles();
+};
+
+/* ---------- quiet commands ----------
+   A pick in a menu (rename, mode, new) runs a command through the session, which
+   hako echoes as if typed. The echo and its one-line answer stay out of the chat;
+   the answer shows in the status line for a moment. */
+const quiet = { lines: new Map(), reply: 0 };
+function quietSlash(cmd) {
+	quiet.lines.set(cmd.trim(), Date.now() + 8000);
+	return post('/api/slash', cmd);
+}
+function quietEcho(text) {
+	const t = String(text || '').trim(), until = quiet.lines.get(t);
+	if (!until) return false;
+	quiet.lines.delete(t);
+	if (Date.now() > until) return false;
+	quiet.reply = Date.now() + 5000;
+	return true;
+}
+function quietReply(text) {
+	if (!quiet.reply || Date.now() > quiet.reply) { quiet.reply = 0; return false; }
+	quiet.reply = 0;
+	if (text) flashStatus(String(text).split('\n')[0].slice(0, 80));
+	return true;
+}
+
+/* ---------- read aloud ----------
+   The browser's own speech (speechSynthesis), and only a voice that runs on this
+   device (localService): the text never leaves it. Code blocks are skipped. */
+const voice = {
+	ok: typeof speechSynthesis !== 'undefined' && typeof SpeechSynthesisUtterance !== 'undefined',
+	btn: null,
+	on() { return this.ok && (!!settings.voice || state.voice === 1); },
+	async voices() {
+		let vs = speechSynthesis.getVoices() || [];
+		if (!vs.length) {            /* Chrome fills the list a moment after load */
+			await new Promise((r) => { speechSynthesis.addEventListener('voiceschanged', r, { once: true }); setTimeout(r, 1200); });
+			vs = speechSynthesis.getVoices() || [];
+		}
+		return vs;
+	},
+	pick(vs) {
+		const local = vs.filter((v) => v.localService);
+		const lang = (navigator.language || 'en-US').toLowerCase(), base = lang.split('-')[0];
+		const by = (l) => l.find((v) => (v.lang || '').toLowerCase() === lang) || l.find((v) => (v.lang || '').toLowerCase().startsWith(base));
+		return by(local) || local.find((v) => v.default) || local[0] || null;
+	},
+	text(raw) {
+		return String(raw)
+			.replace(/```[\s\S]*?(```|$)/g, ' ')            /* code blocks: skipped */
+			.replace(/<(tool|write_file|tool_call)\b[\s\S]*?(<\/\1>|$)/g, ' ')
+			.replace(/`([^`\n]*)`/g, '$1')
+			.replace(/https?:\/\/\S+/g, 'a link')
+			.replace(/^\s*(#+|>|[-*+]|\d+\.)\s+/gm, '')
+			.replace(/[*_~]{1,3}/g, '')
+			.replace(/[ \t]+/g, ' ').trim();
+	},
+	chunks(t) {
+		const out = [];
+		for (const para of t.split(/\n+/)) {
+			let cur = '';
+			for (const s of para.match(/[^.!?;:]+[.!?;:]*\s*/g) || [para]) {
+				if ((cur + s).length > 220 && cur) { out.push(cur.trim()); cur = ''; }
+				cur += s;
+			}
+			if (cur.trim()) out.push(cur.trim());
+		}
+		return out.filter(Boolean);
+	},
+	async speak(raw, btn) {
+		if (!this.ok) return;
+		this.stop();
+		const parts = this.chunks(this.text(raw));
+		if (!parts.length) return;
+		this.mark(btn);
+		const vs = await this.voices();
+		if (this.btn !== (btn || null)) return;           /* stopped while the voices loaded */
+		const v = this.pick(vs);
+		if (!v && vs.length) { this.done(); flashStatus('no on-device voice in this browser'); return; }
+		const rate = state.voice_rate ? Math.min(2, Math.max(.5, state.voice_rate / 180)) : 1;
+		parts.forEach((p, i) => {
+			const u = new SpeechSynthesisUtterance(p);
+			if (v) { u.voice = v; u.lang = v.lang; }
+			u.rate = rate;
+			if (i === parts.length - 1) u.onend = u.onerror = () => { if (this.btn === (btn || null)) this.done(); };
+			speechSynthesis.speak(u);
+		});
+	},
+	mark(btn) {
+		this.btn = btn || null;
+		if (btn) { btn.classList.add('on'); btn.innerHTML = ICO.stop; btn.title = 'stop reading'; }
+	},
+	stop() {
+		if (!this.ok) return;
+		try { speechSynthesis.cancel(); } catch (e) {}
+		this.done();
+	},
+	done() {
+		const b = this.btn;
+		this.btn = null;
+		if (b) { b.classList.remove('on'); b.innerHTML = ICO.speak; b.title = 'read aloud'; }
+	},
+};
+function addSay(el, text) {
+	if (!voice.ok || !el || !el.querySelector) return;
+	const who = el.querySelector('.who');
+	if (!who || !voice.text(text)) return;
+	const b = document.createElement('button');
+	b.type = 'button';
+	b.className = 'say';
+	b.title = 'read aloud';
+	b.setAttribute('aria-label', 'read aloud');
+	b.innerHTML = ICO.speak;
+	b.addEventListener('click', () => { if (voice.btn === b) voice.stop(); else voice.speak(text, b); });
+	who.appendChild(b);
+}
+
+/* ---------- the command menu ----------
+   The commands come from the core (state.commands: one table in hako.c, the same
+   the terminal and the editor's pane draw). `:` runs hako itself, `/` drives the
+   model; the wrong one still works, and the menu shows where each lives. A core
+   that sends no table gets no menu, and the line works as it always did. */
+const cmdmenu = $('cmdmenu');
+let menuItems = [], menuSel = 0, menuShut = null;
+function menuMatches(line) {
+	const cmds = state.commands;
+	if (!Array.isArray(cmds) || !cmds.length || codeLanding()) return [];
+	const m = String(line).match(/^([:/])(\S*)$/);
+	if (!m) return [];
+	const w = m[2].toLowerCase(), pre = [], sub = [];
+	for (const c of cmds) {
+		const n = String(c.n || '').toLowerCase();
+		if (!n) continue;
+		if (n.startsWith(w)) pre.push(c);
+		else if (w && n.includes(w)) sub.push(c);
+	}
+	const rank = (c) => (String(c.n).toLowerCase() === w ? 0 : 2) + (c.p === m[1] ? 0 : 1);
+	pre.sort((a, b) => rank(a) - rank(b) || String(a.n).localeCompare(String(b.n)));
+	return pre.concat(sub);
+}
+function renderMenu() {
+	const items = input.value === menuShut ? [] : menuMatches(input.value);
+	menuItems = items;
+	if (!items.length) { cmdmenu.hidden = true; return; }
+	if (menuSel >= items.length) menuSel = 0;
+	cmdmenu.textContent = '';
+	items.forEach((c, i) => {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.className = 'cmd' + (i === menuSel ? ' sel' : '');
+		b.setAttribute('role', 'option');
+		b.append(Object.assign(document.createElement('span'), { className: 'n', textContent: (c.p || ':') + c.n }));
+		if (c.a) b.append(Object.assign(document.createElement('span'), { className: 'a', textContent: c.a }));
+		b.append(Object.assign(document.createElement('span'), { className: 'd', textContent: c.d || '' }));
+		if (c.c) b.append(Object.assign(document.createElement('span'), { className: 'c', textContent: c.c }));
+		b.addEventListener('pointerdown', (e) => e.preventDefault());      /* keep the field focused */
+		b.addEventListener('click', () => { menuSel = i; completeCmd(c); });
+		cmdmenu.appendChild(b);
+	});
+	cmdmenu.hidden = false;
+	const sel = cmdmenu.children[menuSel];
+	if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+}
+function completeCmd(c) {
+	input.value = (c.p || ':') + c.n + (c.a ? ' ' : '');
+	menuShut = null;
+	input.focus();
+	try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+	syncInput();
+}
+const menuOpen = () => !cmdmenu.hidden && menuItems.length > 0;
+function syncInput() {
+	input.style.height = 'auto';
+	input.style.height = Math.min(input.scrollHeight, 192) + 'px';
+	renderMenu();
+}
+
+/* ---------- the menu panel: folds away, comes back (ctrl+b), remembered here ---------- */
+const narrow = () => !!(window.matchMedia && window.matchMedia('(max-width: 720px)').matches);
+function setSide(off) {
+	settings.side_off = !!off;
+	saveSettings();
+	document.body.classList.toggle('side-off', !!off);
+}
+function toggleSide() {
+	if (narrow()) document.body.classList.toggle('nav');
+	else setSide(!document.body.classList.contains('side-off'));
+}
+document.body.classList.toggle('side-off', !!settings.side_off);
+function applySearch() {
+	const box = $('search');
+	const q = box && !$('searchbox').hidden ? (box.value || '').trim().toLowerCase() : '';
+	if (!document.querySelectorAll) return;
+	for (const row of document.querySelectorAll('#recents .sessrow, #project-list > .sess'))
+		row.hidden = !!q && !(row.textContent || '').toLowerCase().includes(q);
+}
+
 /* ---------- input ---------- */
 const UNSAFE = /^[:/](models?|providers?|theme|login(\s+api)?)\s*$/i;
 const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
@@ -3059,6 +3873,18 @@ form.addEventListener('submit', (e) => {
 	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
 	if (!text && !attached.length) return;
+	voice.stop();
+	menuShut = null; cmdmenu.hidden = true;
+
+	/* code, nothing open yet: the message goes to the session picked above it */
+	if (codeLanding()) {
+		if (!codePick || !text) { flashStatus(codePick ? 'say what to do first' : 'pick a code session first'); return; }
+		try { sessionStorage.setItem('hako-send', JSON.stringify({ id: codePick, text })); } catch (e2) {}
+		location.hash = '#remote=' + codePick; location.reload();
+		return;
+	}
+	if (text && hist[hist.length - 1] !== text) { hist.push(text); if (hist.length > 100) hist.shift(); }
+	histAt = -1;
 	input.value = ''; input.style.height = 'auto';
 
 	if (UNSAFE.test(text)) {
@@ -3070,6 +3896,7 @@ form.addEventListener('submit', (e) => {
 		else openProviderPicker();
 		return;
 	}
+	wantSlide = landing;
 	setBusy(true);
 	if (attached.length && !text.startsWith(':') && !text.startsWith('/')) {
 		flushAttachments().then(({ paths, marks }) => {
@@ -3080,29 +3907,80 @@ form.addEventListener('submit', (e) => {
 		return;
 	}
 	if (text.startsWith(':') || text.startsWith('/')) {
-		post('/api/slash', text);
-		if (CLEARING.test(text)) { clearLog(); post('/api/reset', ''); setBusy(false); }
+		/* starting over brings the greeting back, not the command that did it */
+		if (CLEARING.test(text)) { wantSlide = false; clearLog(); quietSlash(text); post('/api/reset', ''); setBusy(false); state.session_name = ''; renderChrome(); }
+		else post('/api/slash', text);
 	} else post('/api/prompt', text);
 });
 
+/* ↑/↓ walk what you sent, as in the terminal: only when the caret is on the first
+   (↑) or last (↓) line, so moving inside a long draft still works. The draft is kept. */
+const hist = []; let histAt = -1, histDraft = '';
+function histStep(dir) {
+	if (!hist.length) return false;
+	if (histAt < 0) { if (dir > 0) return false; histDraft = input.value; histAt = hist.length; }
+	histAt += dir;
+	if (histAt < 0) histAt = 0;
+	if (histAt >= hist.length) { histAt = -1; input.value = histDraft; }
+	else input.value = hist[histAt];
+	input.setSelectionRange(input.value.length, input.value.length);
+	syncInput();
+	return true;
+}
 input.addEventListener('keydown', (e) => {
+	if (menuOpen()) {
+		if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+			e.preventDefault();
+			menuSel = (menuSel + (e.key === 'ArrowDown' ? 1 : menuItems.length - 1)) % menuItems.length;
+			renderMenu();
+			return;
+		}
+		if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); completeCmd(menuItems[menuSel]); return; }
+		if (e.key === 'Escape') {               /* closes the menu only; the line stays */
+			e.preventDefault(); e.stopPropagation();
+			menuShut = input.value; cmdmenu.hidden = true;
+			return;
+		}
+		if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+			/* a whole command typed runs as typed; a part of one runs the one picked */
+			const w = input.value.slice(1).toLowerCase(), c = menuItems[menuSel];
+			if (!menuItems.some((x) => String(x.n).toLowerCase() === w) && c) input.value = (c.p || ':') + c.n;
+			e.preventDefault();
+			form.requestSubmit();
+			return;
+		}
+	}
+	if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+		const pos = input.selectionStart, v = input.value;
+		const edge = e.key === 'ArrowUp' ? v.lastIndexOf('\n', pos - 1) < 0 : v.indexOf('\n', input.selectionEnd) < 0;
+		if (edge && histStep(e.key === 'ArrowUp' ? -1 : 1)) { e.preventDefault(); return; }
+	}
 	/* Enter sends, Shift+Enter is a newline — the convention everywhere, and what
-	   a hardware keyboard on a tablet expects. The old rule keyed off (hover:hover)
-	   to detect "desktop", which made Enter insert a newline on an iPad with a
-	   keyboard attached. The on-screen keyboard still offers its own return key
-	   for multi-line input via Shift. */
+	   a hardware keyboard on a tablet expects. The on-screen keyboard still offers
+	   its own return key for multi-line input via Shift. */
 	if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 		e.preventDefault();
 		form.requestSubmit();
 	}
 });
-input.addEventListener('input', () => {
-	input.style.height = 'auto';
-	input.style.height = Math.min(input.scrollHeight, 144) + 'px';
-});
+input.addEventListener('input', () => { if (input.value !== menuShut) menuShut = null; syncInput(); });
+input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) cmdmenu.hidden = true; }, 120));
 
-$('burger').addEventListener('click', () => document.body.classList.toggle('nav'));
+$('burger').addEventListener('click', () => { if (narrow()) document.body.classList.toggle('nav'); else setSide(false); });
+$('btn-side').addEventListener('click', () => { if (narrow()) closeNav(); else setSide(true); });
 $('btn-dir').addEventListener('click', () => { closeNav(); openBrowser(); });
+$('btn-search').addEventListener('click', () => {
+	const box = $('searchbox');
+	box.hidden = !box.hidden;
+	if (box.hidden) { $('search').value = ''; applySearch(); }
+	else $('search').focus();
+});
+$('search').addEventListener('input', applySearch);
+$('search').addEventListener('keydown', (e) => {
+	if (e.key !== 'Escape') return;
+	e.stopPropagation();
+	$('search').value = ''; $('searchbox').hidden = true; applySearch();
+});
 /* Straight to the system picker — the browser's own file sheet is better than
    anything we can draw, and on iOS it is Files/Photos. Attaching a file that is
    already on the machine is what the working-directory browser is for. */
@@ -3135,18 +4013,28 @@ document.addEventListener('drop', (e) => {
 });
 $('btn-settings').addEventListener('click', () => { closeNav(); openSettings(); });
 $('btn-new').addEventListener('click', () => {
-	closeNav(); clearLog(); post('/api/slash', ':session new'); post('/api/reset', '');
-});
-$('btn-restart').addEventListener('click', async () => {
-	closeNav(); clearLog(); add('turn system', '', 'reloading this folder…');
-	await post('/api/restart', ''); setBusy(false);
+	closeNav();
+	if (codeLanding()) { input.focus(); return; }
+	voice.stop(); clearLog(); quietSlash(':session new'); post('/api/reset', '');
+	state.session_name = ''; renderChrome();
+	if (!narrow()) input.focus();
 });
 /* The drawer's scrim is body's own ::after, so a tap that lands on body is a tap
    outside the drawer. */
 document.addEventListener('click', (e) => {
 	if (e.target === document.body && document.body.classList.contains('nav')) closeNav();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
+document.addEventListener('keydown', (e) => {
+	if (e.key === 'Escape') closeNav();
+	/* ctrl+b (cmd+b on a Mac) folds the menu away and brings it back. In a Mac
+	   text field ctrl+b is "back one character", so there it is cmd+b only. */
+	if ((e.key === 'b' || e.key === 'B') && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+		const t = e.target || {}, field = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT';
+		if (e.ctrlKey && !e.metaKey && field && /Mac|iPhone|iPad/.test(navigator.platform || '')) return;
+		e.preventDefault();
+		toggleSide();
+	}
+});
 
 /* The on-screen keyboard shrinks the window without changing any CSS viewport
    unit, so the composer ends up underneath it. visualViewport reports the real
@@ -3154,29 +4042,55 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav()
    show the field, so the page sits at the box's offset, not at the top: sized
    alone, the composer landed at the top with blank space under it. A home-screen
    app on iOS reports 100dvh and innerHeight a status bar short while drawing
-   under it, so there the screen is the height. */
+   under it, so there the screen is the height.
+   With the keyboard up iOS also lets the DOCUMENT scroll (a swipe on the chat
+   that ran past its end, or on the header), and the fixed page did not follow:
+   the bar went to the top with a keyboard's height of blank under it. So the
+   document never scrolls (any scroll is undone at once), a swipe outside the
+   scrolling parts does nothing, and every change re-pans. */
 if (window.visualViewport) {
 	const vv = window.visualViewport;
 	const full = () => navigator.standalone
-		? (matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height))
+		? (window.matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height))
 		: window.innerHeight;
 	const isOpen = () => vv.height < window.innerHeight - 80;
-	const pan = () => document.documentElement.style.setProperty('--vt', (isOpen() ? vv.offsetTop : 0) + 'px');
+	const pan = () => {
+		if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+		document.documentElement.style.setProperty('--vt', (isOpen() ? vv.offsetTop : 0) + 'px');
+	};
 	const sync = () => {
 		const open = isOpen();
 		document.documentElement.style.setProperty('--vh', (open ? vv.height : full()) + 'px');
 		pan();
 		document.body.classList.toggle('kb', open);
-		if (open) log.scrollTop = log.scrollHeight;
+		if (open && !landing) log.scrollTop = log.scrollHeight;
 	};
 	vv.addEventListener('resize', sync);
 	vv.addEventListener('scroll', pan);
 	window.addEventListener('resize', sync);
+	window.addEventListener('scroll', pan, { passive: true });
+	/* A swipe that starts outside anything that scrolls would move the page itself. */
+	const SCROLLS = '#log, .recents, .modal .body, .cmdmenu, .below, textarea, .tool.result, .hello';
+	document.addEventListener('touchmove', (e) => {
+		const t = e.target && e.target.closest ? e.target.closest(SCROLLS) : null;
+		if (!t && document.body.classList.contains('kb')) e.preventDefault();
+	}, { passive: false });
 	sync();
 }
-input.addEventListener('focus', () => setTimeout(() => { log.scrollTop = log.scrollHeight; }, 250));
+input.addEventListener('focus', () => setTimeout(() => { if (!landing) log.scrollTop = log.scrollHeight; }, 250));
 
-handshake().then(() => { loadSessions(); browserNotice(); });
+handshake().then(() => {
+	loadSessions(); browserNotice();
+	/* sent from the code landing: it opened this session, now it goes */
+	let held = null;
+	try { held = JSON.parse(sessionStorage.getItem('hako-send') || 'null'); } catch (e) {}
+	if (held && REMOTE_ID && held.id === REMOTE_ID && held.text) {
+		try { sessionStorage.removeItem('hako-send'); } catch (e) {}
+		wantSlide = true; setBusy(true);
+		post('/api/prompt', held.text);
+	}
+});
+renderChrome();
 window.hakoAccount.boot();
 </script>
 </body>

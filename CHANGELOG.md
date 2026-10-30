@@ -6,6 +6,37 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-10-29
+
+### added
+- ↑ and ↓ in the composer walk what you sent (from the first or last line, so a long draft still moves), and a resumed chat's lines are in it too
+- replies render their markdown: headings, lists and task boxes, `code`, code blocks, quotes, tables, links. built as page elements, never as HTML, so nothing a model writes can run in the page
+- a new menu: the wordmark at the top (HAKO in chat, CODE in code), two small icons to switch chat and code, then new, search, files and settings, then recents, then your account. search filters the sessions as you type
+- the menu folds away entirely and a button in the header brings it back; ctrl+b (cmd+b on a Mac) does both. this browser remembers which. folded, the header shows the wordmark. on a phone it stays a drawer
+- an empty chat is a landing: a greeting for the time of day (dawn, morning, afternoon, evening, late night, a few of each), the composer centered under it, and the working folder's newest files as cards. a tap on a card adds the file to your message. the first message slides the composer down to the foot (not with reduced motion)
+- code, before a session is open, is a landing too: pick a folder on one of your computers, add a device, and type what to do. sending opens that session and the message goes with it
+- under the composer: the folder, the model and the mode (ask, plan, auto), each opening its picker. auto stays at the computer itself
+- a command menu over the composer when a line starts with `:` or `/`, from the commands hako sends (`:` runs hako, `/` drives the model, each with its category). arrows move, tab completes, enter runs, esc closes only the menu. a hako that sends no list gets the old behavior
+- read aloud: a small speaker on each reply, a second tap stops it. in settings (or `voice=1` in your `.hakorc`) every reply is read. only this device's own voices, so nothing is sent anywhere; code blocks are skipped and a new message stops it
+- the header says, quietly, when the session is shared (`:remote on`) and when a newer hako is out
+- a session's name from hako shows in the header and the list. ✎ on the open session of a code session names it through hako (`:name`), so the terminal and every page agree; the command and its answer stay out of the chat
+- the rc's theme reaches the page (hako sends it), a custom `theme.<name>.<slot>` one too
+- the files sheet adds a tapped file to your message; in a code session it stays inside that folder
+
+### changed
+- washi and mithraeum print in one ink: sumi on washi, and bone on near-black for mithraeum. no blue, no red. the icon, `favicon.ico` and the share tile follow
+- the default theme is `terminal`: a plain neutral page that follows your system's light or dark, with none of our inks. the 19 others are all still in settings, and a theme picked before stays picked
+- the composer is one rounded box with + and send inside, centered with the chat at a readable width; your messages sit in a soft block on the right
+- the chat tab no longer has the CODE block with add a device on top. code sessions are listed in recents (▣) above this browser's chats (○); add a device lives in the code landing and the account sheet
+- reload this folder moved into settings
+
+### fixed
+- on a phone, a long session title ran under the HAKO/CODE wordmark in the header; the mark keeps its width now (pinned in `make ui-test`)
+- hako.mithraeum.studio kept showing the old icon. the server sent the ス, but browsers keep an icon by its address and the new one had kept the old address plus `?v=2`. the build now names it by its checksum, the manifest points at that name, and `favicon.ico` and `apple-touch-icon.png` answer at the root. an icon already on a home screen stays until it is added again
+- a chat with no message in it ("(empty)") was still listed when it was the open one
+- on an iPhone, a swipe with the keyboard open could scroll the page itself, leaving the bar at the top and a keyboard's height of blank under it. the page no longer scrolls under the keyboard, a swipe outside the chat cannot move it, and it re-pans whenever the visible area moves
+- files in the browser had no modified time, so "newest" meant nothing; they keep one now
+
 ## [v0.0.9] - 2026-10-28
 
 ### added
