@@ -145,6 +145,8 @@ browser drives the page against `hako --serve` and a fake engine — a turn, an 
 picker, uploads, desktop and phone widths, no JS errors.
 
 The hosted page at hako.mithraeum.studio is rebuilt every night from hako-code `main`.
+Each release on GitHub carries the built site, `hako-studio-site.tar.gz`: unpack it on any HTTPS
+static host (the browser keeps files only in a secure context) and it runs with nothing else.
 
 The toolchain is clang. `make toolchain` fetches wasi-sdk (~175 MB) into
 `~/.hako/toolchains`; remove it with `rm -rf`. No emscripten, no npm, no

@@ -6,6 +6,21 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-11-04
+
+### added
+- every tag publishes a GitHub release: that version's notes from this changelog and the built site (`hako-studio-site.tar.gz` with its sha256), ready for any static host
+- pinned chats above recents; each chat's ⋯ menu pins, renames, archives or deletes it
+- recents shows the newest 12; "view all" opens every chat with search and an archived tab
+- hako keeps the pins and the archive beside each chat, so every device on that computer sees the same list; the browser's own chats keep theirs the same way, in the browser (an older hako without `mark` gets this browser's own)
+- a code from `:remote` (or `:remote pair`) opens that session: a browser that already holds your account key goes straight in, one without it pairs first
+- you, at the foot of the menu: a name and a picture (cut to a small square, kept in this browser, never uploaded); a tap opens profile, settings and, in the browser build, the account
+
+### changed
+- link and pair codes are shorter (base64url and a 128-bit secret), so their QR codes are smaller; add a device makes the short one too, and an older hako's hex codes still work
+- the default theme is mithraeum: the site's paper by day, night in the dark; terminal is the plain black and white; both have light, dark or auto (follows the device) in settings; the other themes are unchanged
+- settings moved from the menu's rows into the user menu
+
 ## [v0.1.0] - 2026-10-29
 
 ### added
