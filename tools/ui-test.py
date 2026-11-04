@@ -100,10 +100,18 @@ with sync_playwright() as p:
             ck(not errs, f"[phone] no JS errors {errs[:2]}")
             pg.close(); continue
         bg = lambda: pg.evaluate("getComputedStyle(document.body).backgroundColor")
-        ck(bg() == "rgb(255, 255, 255)", f"the default theme is terminal: a plain light page under a light system ({bg()})")
+        ck(bg() == "rgb(236, 231, 218)", f"no theme in the rc: the default is mithraeum, the site's paper under a light system ({bg()})")
         pg.emulate_media(color_scheme="dark"); pg.wait_for_timeout(150)
-        ck(bg() == "rgb(28, 28, 30)", f"and it follows the system to dark ({bg()})")
+        ck(bg() == "rgb(13, 12, 10)", f"and night when the system goes dark ({bg()})")
         pg.emulate_media(color_scheme="light"); pg.wait_for_timeout(150)
+        # light or dark by hand, for mithraeum and terminal alike
+        pg.evaluate("settings.appearance = 'dark'; paintTheme('mithraeum')")
+        ck(bg() == "rgb(13, 12, 10)", f"appearance dark: night under a light system ({bg()})")
+        pg.evaluate("paintTheme('terminal')")
+        ck(bg() == "rgb(28, 28, 30)", f"terminal, the plain black and white, has its dark too ({bg()})")
+        pg.evaluate("settings.appearance = 'auto'; paintTheme('terminal')")
+        ck(bg() == "rgb(255, 255, 255)", f"and its light under a light system on auto ({bg()})")
+        pg.evaluate("paintTheme('mithraeum')")
         ck("alpha.txt" in pg.inner_text('#files'), "the landing shows the project's recent files")
         geo = pg.evaluate("""(() => { const g = $('greet').getBoundingClientRect(), f = $('form').getBoundingClientRect(), s = $('stage').getBoundingClientRect();
             return [g.left + g.width / 2, s.left + s.width / 2, f.top, f.bottom, s.top, s.bottom, g.bottom]; })()""")
@@ -203,10 +211,16 @@ with sync_playwright() as p:
         ck(pg.locator('.modal').count() == 1 and "hako-sho" in pg.inner_text('.modal'),
            ":model opens the model picker, listing the installed model")
         pg.locator('.modal button', has_text='close').first.click(); pg.wait_for_timeout(400)
-        pg.click('#btn-settings'); pg.wait_for_timeout(500)
+        ck(pg.locator('#btn-settings').count() == 0, "settings left the menu's rows")
+        pg.click('#acct-btn'); pg.wait_for_timeout(200)
+        ck(pg.locator('.pop button', has_text='settings').count() == 1 and pg.locator('.pop button', has_text='profile').count() == 1,
+           "the user at the foot of the menu opens profile and settings")
+        pg.locator('.pop button', has_text='settings').click(); pg.wait_for_timeout(500)
         sw = pg.locator('.modal .swatch').count()
-        ck(sw == 20 * 4 and "terminal" in pg.locator('.modal .opt:has(.swatch)').first.inner_text(),
-           f"settings list terminal first, then all 19 themes, each with its swatches ({sw // 4})")
+        opts = pg.locator('.modal .opt:has(.swatch)')
+        ck(sw == 20 * 4 and "mithraeum" in opts.nth(0).inner_text() and "terminal" in opts.nth(1).inner_text()
+           and pg.locator('.modal .grouplabel', has_text='light or dark').count() == 1,
+           f"settings list mithraeum first, terminal next, 20 themes with swatches, then light or dark ({sw // 4})")
         before = pg.inner_text('#log')
         for t in ('nord', 'washi', 'gruvbox'):
             pg.locator('.modal .opt', has_text=t).first.click(); pg.wait_for_timeout(250)
@@ -228,13 +242,50 @@ with sync_playwright() as p:
         pg.evaluate("takeState({ remote: 1, update: { current: '0.2.10', latest: '0.2.11' } })"); pg.wait_for_timeout(100)
         ck("remote" in pg.inner_text('#ind') and "0.2.11" in pg.inner_text('#ind'), f"remote and an update show quietly in the header ({pg.inner_text('#ind')!r})")
         pg.evaluate("takeState({ theme: 'gruvbox', theme_slots: null, remote: 0, update: null })")
-        pg.locator('#sessions .sessrow').first.hover(); pg.locator('#sessions .sessrow .act.ren').first.click(); pg.wait_for_timeout(300)
+        pg.locator('#sessions .sessrow').first.hover(); pg.locator('#sessions .sessrow .act.more').first.click(); pg.wait_for_timeout(200)
+        pg.locator('.pop button', has_text='rename').click(); pg.wait_for_timeout(300)
         pg.fill('.modal input', 'pong night'); pg.keyboard.press('Enter'); pg.wait_for_timeout(1500)
         state_file = os.popen(f"cat {HOME}/.hako/projects/*/state 2>/dev/null").read()
         echoed = pg.locator('.turn.user', has_text=':name').count() + pg.locator('.turn.system', has_text='chat named').count()
         ck(pg.inner_text('#title') == 'pong night' and not echoed and "pong night" in pg.inner_text('#sessions')
            and "session_name=pong night" in state_file,
-           f"the pencil on the open session names it through hako (:name), quietly; header and list show it ({pg.inner_text('#title')!r}, echoed {echoed})")
+           f"rename on the open session names it through hako (:name), quietly; header and list show it ({pg.inner_text('#title')!r}, echoed {echoed})")
+        # pin, archive, view all: kept by hako beside the chat, so another device sees them
+        n0 = pg.locator('#sessions .sessrow').count()
+        pg.locator('#sessions .sessrow').first.hover(); pg.locator('#sessions .sessrow .act.more').first.click(); pg.wait_for_timeout(150)
+        pg.locator('.pop button', has_text='pin').click(); pg.wait_for_timeout(200)
+        ck(not pg.locator('#pinned-wrap').is_hidden() and "pong night" in pg.inner_text('#pinned') and "pong night" not in pg.inner_text('#sessions'),
+           "pin moves a chat up into pinned, out of recents")
+        marks = os.popen(f"cat {HOME}/.hako/projects/*/sessions/*.mark 2>/dev/null").read()
+        other = b.new_page(viewport=vp); other.goto(U); other.wait_for_timeout(1500)
+        ck(marks.strip() == "pinned" and "pong night" in other.inner_text('#pinned') and pg.evaluate("settings.pins.length") == 0,
+           f"hako keeps the pin (a .mark sidecar, not this browser), and a fresh browser sees it ({marks.strip()!r})")
+        other.close()
+        pg.locator('#pinned .sessrow').first.hover(); pg.locator('#pinned .sessrow .act.more').first.click(); pg.wait_for_timeout(150)
+        pg.locator('.pop button', has_text='archive').click(); pg.wait_for_timeout(200)
+        ck(pg.locator('#pinned-wrap').is_hidden() and "pong night" not in pg.inner_text('#sessions') and not pg.locator('#btn-all').is_hidden(),
+           "archive tucks it away (unpinned) and view all appears")
+        pg.click('#btn-all'); pg.wait_for_timeout(300)
+        pg.locator('.modal .tabs button', has_text='archived').click(); pg.wait_for_timeout(150)
+        ck("pong night" in pg.inner_text('.modal .sessions') and "archived 1" in pg.inner_text('.modal .tabs'),
+           "view all shows it under archived")
+        pg.locator('.modal .sessrow').first.hover(); pg.locator('.modal .sessrow .act.more').first.click(); pg.wait_for_timeout(150)
+        pg.locator('.pop button', has_text='unarchive').click(); pg.wait_for_timeout(150)
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+        ck("pong night" in pg.inner_text('#sessions') and pg.locator('#sessions .sessrow').count() == n0,
+           "unarchive brings it back to recents")
+        # profile: a name, and a picture that never leaves the browser
+        pg.click('#acct-btn'); pg.locator('.pop button', has_text='profile').click(); pg.wait_for_timeout(200)
+        pg.fill('.modal .profile input:not([type=file])', 'Zach'); pg.keyboard.press('Enter'); pg.wait_for_timeout(200)
+        ck("Zach" in pg.inner_text('#acct') and pg.inner_text('#acct .avatar').lower() == "z", "a name in profile shows at the foot, its first letter as the face")
+        px = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        pg.click('#acct-btn'); pg.locator('.pop button', has_text='profile').click(); pg.wait_for_timeout(200)
+        pg.set_input_files('.modal .profile input[type=file]', files=[{"name": "me.png", "mimeType": "image/png", "buffer": __import__('base64').b64decode(px)}])
+        pg.wait_for_timeout(400); pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+        av = pg.evaluate("settings.avatar")
+        ck(av.startswith("data:image/jpeg") and "url(" in pg.evaluate("$('acct').querySelector('.avatar').style.backgroundImage")
+           and not any(f.startswith('me') for f in os.listdir(PROJ)),
+           f"a picture is cut down to a small jpeg kept in settings, shown at the foot, nothing written to the folder ({len(av)} chars)")
         # a pasted screenshot: a chip on the tray, then [image #N] in the message and the bytes in hako's images dir
         pg.evaluate("""(() => { const px = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
             const dt = new DataTransfer(); dt.items.add(new File([Uint8Array.from(px, (c) => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));

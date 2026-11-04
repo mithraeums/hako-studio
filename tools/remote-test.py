@@ -8,7 +8,7 @@ computer, and runs a turn on it through the relay. Fake engine, no network.
 
 Needs playwright + chromium, a built ../hako-code/hako, relay/relay and a
 `make site RELAY_URL=http://127.0.0.1:18793` dist (make remote-test does both)."""
-import glob, os, re, sys, time, pty, fcntl, termios, struct, select, signal, subprocess, tempfile
+import base64, glob, os, re, sys, time, pty, fcntl, termios, struct, select, signal, subprocess, tempfile
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
@@ -108,11 +108,16 @@ def until(pat, secs=15):
     return None
 pump(2.0)
 os.write(fd, b":remote on 8797\r")
-m = until(rb"(http://localhost:\d+/#link=[0-9a-f]{64}\.[0-9a-f]{64})")
+m = until(rb"(http://localhost:\d+/#link=[\w-]{43}\.[\w-]{22})(?![\w-])")
 res = []
 def ck(c, what): res.append(("ok  " if c else "FAIL") + " " + what)
-ck(m is not None, "desktop: :remote on shows a link page")
-ck("\u2588\u2580\u2580\u2580\u2580\u2580\u2588".encode() in seen.split(b"#link=")[0].split(b"link this computer")[-1], "desktop: and a QR code of it, for a phone")
+ck(m is not None, "desktop: :remote on shows a link page, short (base64url, a 16-byte secret)")
+QRB = "\u2588\u2580\u2580\u2580\u2580\u2580\u2588".encode()      # a QR's finder pattern, top row
+time.sleep(0.5)
+ck(QRB not in seen and b"shows it as a QR code" in seen, "desktop: a link, like a sign-in, no QR until asked")
+mq = len(seen)
+os.write(fd, b":remote\r"); time.sleep(2); os.write(fd, b"\r"); time.sleep(1.5)       # the panel: show a QR code
+ck(QRB in seen[mq:] and b"link this computer" in seen[mq:], "desktop: :remote draws the link as a QR code on request")
 link = m.group(1).decode() if m else STUDIO
 if not m and os.environ.get("DEBUG"): print("TTY0:", [l.strip()[:200] for l in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen).decode(errors="replace").splitlines() if "remote" in l or "link" in l or "rror" in l])
 
@@ -135,6 +140,14 @@ with sync_playwright() as p:
     pg.wait_for_selector('.modal .note:has-text("linked")', timeout=15000)
     ck(True, "page: the passkey makes the account and links the computer")
     ck('#link=' not in pg.url, "page: the link secret leaves the address bar")
+    kc = pg.evaluate("""(() => {
+        const p = hex(hk.random(32)), i = hex(hk.random(16)), s = hk.random(16), sh = hex(s).padEnd(64, '0');
+        const now = keyCode('#link=' + b64u(unhex(p)) + '.' + b64u(s), 'link', 32), old = keyCode('#link=' + p + '.' + sh, 'link', 32);
+        const pr = keyCode('#pair=' + b64u(unhex(i)) + '.' + b64u(s), 'pair', 16), po = keyCode('#pair=' + i + '.' + sh, 'pair', 16);
+        const bad = [keyCode('#link=' + p.slice(2) + '.' + sh, 'link', 32), keyCode('#pair=' + b64u(unhex(i)) + '.x', 'pair', 16), keyCode('#pair=' + i, 'pair', 16)];
+        return now[1] === p && now[2] === sh && old[1] === p && old[2] === sh && pr[1] === i && pr[2] === sh && po[1] === i && bad.every((x) => x === null);
+    })()""")
+    ck(kc, "page: reads the short link code and an older hako's hex one alike, and refuses a cut one")
     ck(until(rb"remote: linked") is not None, "desktop: linked, the account key arrived")
 
     # a fresh device: nothing stored, the same synced passkey
@@ -239,16 +252,24 @@ with sync_playwright() as p:
        "webkit: a second device joins the account, signed in without the account key")
     mark = len(seen)
     os.write(fd, b":remote pair\r")
-    pm = until(rb"(http://localhost:\d+/#pair=([0-9a-f]{32})\.([0-9a-f]{64}))")
-    ck(pm is not None and "\u2580".encode() in seen[mark:] and "\u2584".encode() in seen[mark:],
-       "desktop: :remote pair draws a code and prints its address")
+    pm = until(rb"(http://localhost:\d+/#pair=([\w-]{22})\.([\w-]{22}))(?![\w-])")
+    time.sleep(0.5)
+    ck(pm is not None and QRB not in seen[mark:] and b"shows it as a QR code" in seen[mark:],
+       "desktop: :remote pair prints its link, no QR until asked")
     if pm:
         wp.goto(pm.group(1).decode())
-        try: wp.wait_for_selector('.modal .note:has-text("added")', timeout=15000)
+        try: wp.wait_for_function("location.hash.startsWith('#remote=')", timeout=15000); wp.wait_for_load_state(); wp.wait_for_timeout(1500)
         except Exception: pass
         ck(wp.evaluate("(async () => hex(await kvGet('k') || new Uint8Array(0)))()") == K and '#pair=' not in wp.url,
            "webkit: the code hands this browser the account key, and leaves the address bar")
+        ck(wp.url.endswith('#remote=' + base64.urlsafe_b64decode(pm.group(2) + b'==').hex()), "webkit: and opens that session (%s)" % wp.url[-50:])
         ck(until(rb"remote: paired") is not None, "desktop: says a browser was paired")
+        mark = len(seen)
+        os.write(fd, b":remote\r"); time.sleep(4)
+        txt = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen[mark:]).decode("utf-8", "replace")
+        ck("under code" in txt and "here now" in txt and "Safari" in txt and "Chrome" in txt and "show a QR code" in txt and "turn off" in txt,
+           "desktop: :remote lists the account's browsers (here now), with turn off and a code for a phone %r" % txt[-300:])
+        os.write(fd, b"\x1b"); time.sleep(0.6)
         again = wp.evaluate("(async (a) => { try { await pairDevice(a[0], a[1]); return 'took it'; } catch (e) { return e.message; } })(%s)"
                             % [pm.group(2).decode(), pm.group(3).decode()])
         ck(again.startswith("no answer"), "webkit: a code works once (%s)" % again[:40])
@@ -318,12 +339,14 @@ with sync_playwright() as p:
         gc = b.new_context(viewport={'width': 390, 'height': 844}); gp = gc.new_page()
         gerrs = []; gp.on('pageerror', lambda e: gerrs.append(str(e)))
         os.write(fd, b":remote pair\r"); time.sleep(1.5)
-        gm = re.findall(rb"http://localhost:\d+/#pair=[0-9a-f]{32}\.[0-9a-f]{64}", seen)
+        gm = re.findall(rb"http://localhost:\d+/#pair=[\w-]{22}\.[\w-]{22}(?![\w-])", seen)
         if gm:
             gp.goto(gm[-1].decode())
             try:
                 gp.click('.modal button:has-text("sign in with %s")' % sname, timeout=10000)
-                gp.wait_for_selector('.modal .note:has-text("added")', timeout=15000)
+                gp.wait_for_function("location.hash.startsWith('#remote=')", timeout=15000); gp.wait_for_load_state(); gp.wait_for_timeout(1500)
+                gp.evaluate("document.getElementById('acct-btn').click(); [...document.querySelectorAll('.pop button')].find((b) => b.textContent === 'account').click()")
+                gp.wait_for_selector('.modal .acctinfo', timeout=10000)
             except Exception: pass
             ck(gp.evaluate("(async () => hex(await kvGet('k') || new Uint8Array(0)))()") == K
                and gp.evaluate("relay.acct") == pg.evaluate("relay.acct"),
@@ -335,13 +358,13 @@ with sync_playwright() as p:
             gdev = gp.evaluate("relay.id")
             gp.locator('.modal button:has-text("sign out")').click(); gp.wait_for_timeout(1500)
             ck(gp.evaluate("(async () => { await relay.signIn(); return relay.acct + '|' + (await kvGet('k') ? 'k' : '') + '|' + (relay.id !== %r); })()" % gdev) == "||true"
-               and "sign in" in gp.evaluate("$('acct').textContent")
+               and gp.evaluate("userFoot.account[0]") == "sign in"
                and gdev not in pg.evaluate("(async () => (await relay.req('GET', '/v1/devices')).text)()"),
-               "%s: sign out drops the device from the account and forgets the key; the menu says sign in" % sp)
-            gp.evaluate("document.getElementById('acct-btn').click()")
+               "%s: sign out drops the device from the account and forgets the key; the user menu offers sign in" % sp)
+            gp.evaluate("document.getElementById('acct-btn').click(); [...document.querySelectorAll('.pop button')].find((b) => /^(account|sign in)$/.test(b.textContent)).click()")
             gp.wait_for_selector('.modal h2:has-text("sign in")', timeout=10000)
             ck(gp.locator('.modal .signin button:has-text("sign in with %s") svg' % sname).count() == 1,
-               "%s: signed out, the menu foot opens sign in, the %s button carries its mark" % (sp, sname))
+               "%s: signed out, the user menu opens sign in, the %s button carries its mark" % (sp, sname))
         else: ck(False, "%s: a second :remote pair code" % sp)
         ck(not gerrs, "%s: no JS errors %s" % (sp, gerrs[:2]))
         gc.close()
@@ -380,7 +403,7 @@ with sync_playwright() as p:
     np_.locator('.modal .opt:has-text("add a device")').click()
     np_.wait_for_selector('.modal svg.qr', timeout=10000)
     plink = np_.locator('.modal input.pairlink').input_value()
-    ck(re.search(r"#pair=%s\.[0-9a-f]{64}$" % np_.evaluate("relay.id"), plink) is not None,
+    ck(re.search(r"#pair=%s\.[\w-]{22}$" % re.escape(base64.urlsafe_b64encode(bytes.fromhex(np_.evaluate("relay.id"))).rstrip(b"=").decode()), plink) is not None,
        "pair: add a device on a browser shows a QR and a link to its own pair code")
     xc, xp = fresh()
     xp.goto(plink)
@@ -403,7 +426,7 @@ with sync_playwright() as p:
        "key: while another browser holds it, a new one waits for a pairing")
     yp.locator('.modal button:has-text("close")').last.click()
     xp.evaluate("hakoAccount.signOut()"); xp.wait_for_timeout(1000)
-    yp.evaluate("document.getElementById('acct-btn').click()")
+    yp.evaluate("document.getElementById('acct-btn').click(); [...document.querySelectorAll('.pop button')].find((b) => /^(account|sign in)$/.test(b.textContent)).click()")
     try: yp.wait_for_selector('.modal .acctinfo', timeout=10000)
     except Exception: pass
     yk = yp.evaluate(kq)
@@ -413,6 +436,18 @@ with sync_playwright() as p:
     for c in (nc, xc, yc): c.close()
     pg.click('#mode-chat'); pg.wait_for_timeout(2000)
     ck('#remote=' not in pg.url and pg.locator('#mode-chat.on').count() == 1, "page: chat goes back to this browser's own agent")
+    # this browser's chats keep their pin beside the chat too (the worker's .mark), like hako does
+    wm = pg.evaluate("""async () => {
+        const d = '/hako/.hako/projects/-workspace/sessions', id = '6aea0000beef';
+        await fetch('/api/upload?dir=' + encodeURIComponent(d) + '&name=' + id + '.jsonl', { method: 'POST', body: new Blob(['{"role":"user","content":"wasm pin"}\\n']) });
+        const okp = async (b) => (await (await fetch('/api/session/mark', { method: 'POST', body: b })).json()).ok;
+        const ok = await okp(id + '\\npinned'), bad = await okp('nope\\npinned'), odd = await okp(id + '\\nweird');
+        const s = (await (await fetch('/api/sessions')).json()).sessions.find((x) => x.id === id);
+        await fetch('/api/session/delete', { method: 'POST', body: id });
+        const gone = !(await (await fetch('/api/sessions')).json()).sessions.some((x) => x.id === id);
+        return [ok, bad, odd, s && s.mark, gone];
+    }""")
+    ck(wm[:5] == [True, False, False, "pinned", True], "chat: the browser's own chats take a pin (and refuse a missing chat or an odd mark) %s" % wm)
     pg.wait_for_timeout(1500)
     ck(pg.locator('#projects').is_visible() and pg.locator('#here').is_visible()
        and pg.locator('#project-list .sess.k-code:has-text("proj")').count() == 1

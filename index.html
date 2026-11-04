@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#ece7da">
 <meta name="description" content="The hako coding agent, compiled to WebAssembly and running in your browser tab. No account, no backend, no install; your key goes straight to the provider.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mithraeum">
@@ -32,28 +32,28 @@
 <title>hako</title>
 <style>
 	:root {
-		--bg:      #ffffff;
-		--panel:   #f7f7f7;
-		--panel-2: #ececec;
-		--line:    #e3e3e3;
-		--line-2:  #cccccc;
-		--bone:    #1d1d1f;
-		--gold:    #1d1d1f;
-		--gold-dim:#8e8e93;
-		--phos:    #636366;
-		--dim:     #6e6e73;
-		--faint:   #9a9aa0;
-		--err:     #c9302c;
-		--ink:     #ffffff;
+		--bg:      #ece7da;
+		--panel:   #e4dece;
+		--panel-2: #dad3c1;
+		--line:    #cfc7b3;
+		--line-2:  #b9b09a;
+		--bone:    #1d1c19;
+		--gold:    #14130f;
+		--gold-dim:#6e685a;
+		--phos:    #4a463d;
+		--dim:     #5f5a4e;
+		--faint:   #8a8473;
+		--err:     #c2311f;
+		--ink:     #ece7da;
 		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 		--serif: ui-serif, "New York", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
 		--sidebar: 268px;
 		--col: 768px;
 	}
-	/* terminal, the default, before the script runs: the system's own light or dark */
+	/* mithraeum, the default, before the script runs: the site's paper, night in the dark */
 	@media (prefers-color-scheme: dark) {
-		:root { --bg:#1c1c1e; --panel:#232325; --panel-2:#2c2c2e; --line:#38383a; --line-2:#48484a; --bone:#e5e5e7;
-		        --gold:#e5e5e7; --gold-dim:#8e8e93; --phos:#a1a1a6; --dim:#98989d; --faint:#6e6e73; --err:#ff6961; --ink:#1c1c1e; }
+		:root { --bg:#0d0c0a; --panel:#151410; --panel-2:#1d1b17; --line:#2a2722; --line-2:#3a362e; --bone:#e6e0d1;
+		        --gold:#e6e0d1; --gold-dim:#8c8677; --phos:#bdb6a5; --dim:#8a8473; --faint:#5f5a4e; --err:#ff5a4a; --ink:#0d0c0a; }
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; margin: 0; }
@@ -154,16 +154,44 @@
 		.sessrow .act { visibility: hidden; }
 		.sessrow:hover .act, .sessrow:focus-within .act { visibility: visible; }
 	}
-	.sessrow .act:hover { border-color: var(--line); }
-	.sessrow .act.ren:hover { color: var(--gold); }
-	.sessrow .act.del:hover { color: var(--err); }
+	.sessrow .act:hover { border-color: var(--line); color: var(--bone); }
+	.sessrow .act.open { visibility: visible; color: var(--bone); }
+	.allrow { color: var(--dim); font-size: 12.5px; padding-left: .55rem; }
+	.pinned .label { padding: .55rem .55rem .1rem; margin: 0; }
+	/* a small menu at what was tapped: a chat's pin/rename/archive/delete, the user's menu */
+	.pop {
+		position: fixed; z-index: 45; min-width: 168px; padding: .3rem; background: var(--panel);
+		border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+		display: flex; flex-direction: column;
+	}
+	.pop button {
+		display: block; width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
+		color: var(--bone); font: inherit; font-size: 13px; padding: .45rem .6rem; border-radius: 7px;
+	}
+	.pop button:hover { background: var(--panel-2); border-color: transparent; }
+	.pop button.danger { color: var(--err); }
+	.pop hr { border: 0; border-top: 1px solid var(--line); margin: .25rem .2rem; }
+	/* the user: a picture kept in this browser, or the name's first letter */
+	.avatar {
+		width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--panel-2) center / cover no-repeat;
+		border: 1px solid var(--line-2); display: inline-flex; align-items: center; justify-content: center;
+		color: var(--bone); font-size: 12px; text-transform: lowercase; overflow: hidden;
+	}
+	.avatar.big { width: 64px; height: 64px; font-size: 26px; }
+	.profile { display: flex; align-items: center; gap: .8rem; padding: .55rem; }
+	.profile .grow { display: flex; flex-direction: column; gap: .4rem; }
+	.profile .btns { display: flex; gap: .4rem; flex-wrap: wrap; }
+	.tabs { display: flex; gap: 2px; padding: 2px; margin: .2rem .55rem .4rem; border: 1px solid var(--line); border-radius: 9px; width: max-content; }
+	.tabs button { border: 0; background: transparent; color: var(--dim); font-size: 12px; padding: .3rem .8rem; border-radius: 7px; }
+	.tabs button.on { background: var(--bg); color: var(--bone); box-shadow: 0 0 0 1px var(--line-2); }
 
 	/* who is signed in, at the foot of the menu, like every app with accounts */
 	.acct { margin-top: auto; border-top: 1px solid var(--line); padding: .4rem; }
 	.acct button { display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; border-color: transparent; padding: .45rem .5rem; border-radius: 8px; }
 	.acct button:hover { border-color: transparent; background: var(--panel-2); }
 	.acct .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.acct .who span { display: block; color: var(--faint); font-size: 10px; }
+	.acct .who span { display: flex; align-items: center; gap: .3rem; color: var(--faint); font-size: 10px; }
+	.acct .who .mini { width: 10px; height: 10px; }
 	.ico { width: 18px; height: 18px; flex: none; }
 	/* the sign-in choices: one wide button each, the provider's own mark on the left */
 	.signin { display: flex; flex-direction: column; gap: .45rem; padding: .55rem; }
@@ -500,14 +528,15 @@
 		<button class="navrow" id="btn-search" type="button"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>search</button>
 		<div class="searchbox" id="searchbox" hidden><input id="search" type="search" placeholder="search sessions" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
 		<button class="navrow" id="btn-dir" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5"/></svg>files</button>
-		<button class="navrow" id="btn-settings" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2"/><circle cx="9" cy="16.5" r="2"/></svg>settings</button>
 	</nav>
 	<div class="recents" id="recents">
+		<div class="pinned" id="pinned-wrap" hidden><div class="label">pinned</div><div class="sessions" id="pinned"></div></div>
 		<div class="label" id="recents-label">recents</div>
 		<div class="projects" id="projects" hidden><div class="sessions" id="project-list"></div></div>
-		<div class="here" id="here"><div class="sessions" id="sessions"></div></div>
+		<div class="here" id="here"><div class="sessions" id="sessions"></div>
+			<button class="navrow allrow" id="btn-all" type="button" hidden>view all</button></div>
 	</div>
-	<div class="acct" id="acct" hidden></div>
+	<div class="acct" id="acct"></div>
 </aside>
 
 <main>
@@ -584,8 +613,6 @@ const SSO_BACK = (() => {
 })();
 const HASH = SSO_BACK ? SSO_BACK.hash : typeof location === 'object' ? location.hash : '';
 const REMOTE_ID = (HASH.match(/^#remote=([0-9a-f]{32})$/) || [])[1] || '';
-const LINK = HASH.match(/^#link=([0-9a-f]{64})\.([0-9a-f]{64})$/);
-const PAIR = HASH.match(/^#pair=([0-9a-f]{32})\.([0-9a-f]{64})$/);
 const INVITE = (HASH.match(/^#invite=([a-z0-9-]{10,16})$/i) || [])[1] || '';
 
 /* a test turns this on (window.hakoDebug) to see the streams; off, it costs nothing */
@@ -598,6 +625,20 @@ const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const b64u = (b) => b64(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64u = (s) => unb64(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
 const cat = (...p) => { const o = new Uint8Array(p.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of p) { o.set(x, i); i += x.length; } return o; };
+/* A link code (#link=<computer pub>.<secret>, #pair=<device id>.<secret>), as
+   [hash, key hex, secret hex]: base64url with a 16-byte secret now, the front
+   of the 32-byte key slot (the rest zero), or hex from an older hako. */
+const keyCode = (h, name, n) => {
+	const m = h.match(new RegExp('^#' + name + '=([\\w-]+)\\.([\\w-]+)$'));
+	const part = (s, n) => s.length === 2 * n && /^[0-9a-f]+$/.test(s) ? s : s.length === Math.ceil(n * 4 / 3) && /^[\w-]+$/.test(s) ? hex(unb64u(s)) : '';
+	try {
+		const k = m && part(m[1], n), s16 = m && part(m[2], 16), s = m && (part(m[2], 32) || (s16 && s16.padEnd(64, '0')));
+		return k && s ? [m[0], k, s] : null;
+	} catch (e) { return null; }
+};
+const LINK = keyCode(HASH, 'link', 32), PAIR = keyCode(HASH, 'pair', 16);
+/* a pair code's secret: 16 random bytes at the front of the 32-byte key slot */
+const keySecret = () => cat(hk.random(16), new Uint8Array(16));
 
 /* hako.wasm's hkw_* exports in this page (the worker has its own instance).
    Bytes go in through hkw_in and come back through hkw_out; views are made
@@ -1175,26 +1216,117 @@ const markBtn = (k, label, fn) => {
 	return b;
 };
 
+/* ---------- the user: the foot of the menu ----------
+   A name and a picture, kept in this browser's settings and never sent anywhere,
+   then how this browser is signed in (the browser build). A tap opens the menu:
+   profile, settings, the account. */
+const userFoot = { sub: '', mark: '', account: null };
+function avatarEl(big) {
+	const a = document.createElement('span');
+	a.className = 'avatar' + (big ? ' big' : '');
+	a.setAttribute('aria-hidden', 'true');
+	if (settings.avatar) a.style.backgroundImage = 'url("' + settings.avatar + '")';
+	else a.textContent = (settings.name || '').trim().charAt(0) || '\u25cb';
+	return a;
+}
+function renderUser() {
+	const el = $('acct');
+	if (!el) return;
+	el.textContent = '';
+	const who = document.createElement('div');
+	who.className = 'who';
+	who.textContent = (settings.name || '').trim() || 'you';
+	if (userFoot.sub) {
+		const sub = document.createElement('span');
+		if (userFoot.mark) { const ic = icon(userFoot.mark); ic.classList.add('mini'); sub.appendChild(ic); }
+		sub.appendChild(document.createTextNode(userFoot.sub));
+		who.appendChild(sub);
+	}
+	const b = document.createElement('button');
+	b.type = 'button'; b.id = 'acct-btn';
+	b.title = 'profile, settings' + (userFoot.account ? ', account' : '');
+	b.append(avatarEl(), who);
+	b.addEventListener('click', (e) => { e.stopPropagation(); openUserMenu(b); });
+	el.appendChild(b);
+}
+function openUserMenu(anchor) {
+	const go = (fn) => () => { closeNav(); fn(); };
+	popMenu(anchor, [
+		['profile', go(openProfile)],
+		['settings', go(openSettings)],
+		userFoot.account && 'sep',
+		userFoot.account && [userFoot.account[0], go(userFoot.account[1])],
+	], true);
+}
+/* A picture is cut to a 128 px square here and kept as a small jpeg in settings. */
+function pictureFrom(file) {
+	return new Promise((resolve, reject) => {
+		const url = URL.createObjectURL(file), img = new Image();
+		img.onload = () => {
+			const n = 128, c = document.createElement('canvas'), side = Math.min(img.naturalWidth, img.naturalHeight);
+			c.width = c.height = n;
+			c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, n, n);
+			URL.revokeObjectURL(url);
+			resolve(c.toDataURL('image/jpeg', 0.85));
+		};
+		img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not a picture this browser can open')); };
+		img.src = url;
+	});
+}
+function openProfile() {
+	const m = modal('profile');
+	const row = document.createElement('div');
+	row.className = 'profile';
+	let face = avatarEl(true);
+	const col = document.createElement('div');
+	col.className = 'grow';
+	const inp = document.createElement('input');
+	inp.placeholder = 'your name'; inp.maxLength = 60; inp.autocomplete = 'off'; inp.spellcheck = false;
+	inp.value = settings.name || '';
+	const btns = document.createElement('div');
+	btns.className = 'btns';
+	const pick = document.createElement('input');
+	pick.type = 'file'; pick.accept = 'image/*'; pick.hidden = true;
+	const redraw = () => { const f = avatarEl(true); face.replaceWith(f); face = f; drop.hidden = !settings.avatar; renderUser(); };
+	const choose = mb('choose a picture', '', () => pick.click());
+	const drop = mb('remove it', '', () => { settings.avatar = ''; saveSettings(); redraw(); });
+	choose.type = drop.type = 'button';
+	drop.hidden = !settings.avatar;
+	pick.addEventListener('change', async () => {
+		const f = pick.files && pick.files[0];
+		pick.value = '';
+		if (!f) return;
+		try { settings.avatar = await pictureFrom(f); saveSettings(); redraw(); }
+		catch (e) { flashStatus(e.message); }
+	});
+	btns.append(choose, drop, pick);
+	col.append(inp, btns);
+	row.append(face, col);
+	const note = document.createElement('div');
+	note.className = 'note';
+	note.textContent = 'Your name and picture stay in this browser. Nothing is uploaded; hako studio keeps no copy.';
+	m.body.append(row, note);
+	const save = () => { settings.name = inp.value.trim().replace(/\s+/g, ' '); saveSettings(); renderUser(); };
+	inp.addEventListener('input', () => { if (!settings.avatar) { const f = avatarEl(true); f.textContent = inp.value.trim().charAt(0) || '\u25cb'; face.replaceWith(f); face = f; } });
+	inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') m.close(); });
+	m.onclose = save;
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('done', 'primary', m.close));
+	if (!narrow()) setTimeout(() => inp.focus(), 0);
+}
+
 let ssoBack = SSO_BACK;
 window.hakoAccount = {
 	enabled: HAKO_WASM_MODE,
 	/* The foot of the menu: "sign in", or how this browser is signed in. From
 	   what is stored here until the relay has answered, then from the relay. */
 	async renderAcct() {
-		const el = $('acct');
-		if (!HAKO_WASM_MODE || !el) return;
+		if (!HAKO_WASM_MODE) return;
 		const acct = relay.token ? relay.acct : (await kvGet('acct')) || '', via = await kvGet('via');
-		el.textContent = '';
-		const who = document.createElement('div');
-		who.className = 'who';
-		who.textContent = acct ? (VIA[via] ? 'signed in with ' + VIA[via] : 'signed in') : 'sign in';
-		who.appendChild(Object.assign(document.createElement('span'), { textContent: acct ? 'account ' + acct.slice(0, 8) : 'code sessions, closed beta' }));
-		const b = document.createElement('button');
-		b.type = 'button'; b.id = 'acct-btn';
-		b.append(icon(acct ? via : 'out'), who);
-		b.addEventListener('click', () => { closeNav(); this.open(); });
-		el.appendChild(b);
-		el.hidden = false;
+		userFoot.sub = acct ? (VIA[via] ? 'signed in with ' + VIA[via] : 'signed in') : '';
+		userFoot.mark = acct && VIA[via] ? via : '';
+		userFoot.account = [acct ? 'account' : 'sign in', () => this.open()];
+		renderUser();
 	},
 	/* Signing out drops this browser from the account on the relay too, then
 	   forgets everything here (device key, account key), so the next sign-in
@@ -1213,8 +1345,8 @@ window.hakoAccount = {
 		const say = (t) => { const n = document.createElement('div'); n.className = 'note'; n.textContent = t; m.body.appendChild(n); return n; };
 		const K = relay.acct && !REMOTE_ID ? await kvGet('k') : null;
 		if (K) {
-			const secret = hk.random(32), ctl = new AbortController();
-			const url = location.origin + location.pathname + '#pair=' + relay.id + '.' + hex(secret);
+			const secret = keySecret(), ctl = new AbortController();
+			const url = location.origin + location.pathname + '#pair=' + b64u(unhex(relay.id)) + '.' + b64u(secret.subarray(0, 16));
 			m.onclose = () => ctl.abort();
 			m.body.appendChild(groupLabel('a phone or another browser'));
 			say('scan this, or open the link on it, then sign in there. it works once, while this stays open.');
@@ -1260,8 +1392,15 @@ window.hakoAccount = {
 				return;
 			}
 			if (pairTo) {
-				try { await pairDevice(pairTo[1], pairTo[2]); await settleKey(); say('added. this browser holds your account key now.'); }
+				/* the code opens that session: a browser that already holds the key goes
+				   straight there and leaves the code unused; one without it pairs first */
+				let ok = !!(await kvGet('k'));
+				if (ok) history.replaceState(null, '', location.pathname);
+				else try { await pairDevice(pairTo[1], pairTo[2]); await settleKey(); say('added. this browser holds your account key now.'); ok = true; }
 				catch (e) { fail(e); }
+				if (ok && (await codeSessions()).some((c) => c.id === pairTo[1])) {
+					location.hash = '#remote=' + pairTo[1]; location.reload(); return;
+				}
 			}
 			const v = await kvGet('via'), info = document.createElement('div');
 			info.className = 'acctinfo';
@@ -1605,7 +1744,7 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 			input_prompt: pendingKey ? ('paste your ' + pendingKey + ' API key')
 			            : pendingCode ? 'paste the code shown on that page' : '',
 			caps: ['prompt', 'slash', 'input', 'events', 'models', 'providers', 'sessions',
-			       'history', 'rename', 'delete', 'dirs', 'files', 'open', 'mkdir',
+			       'history', 'rename', 'delete', 'mark', 'dirs', 'files', 'open', 'mkdir',
 			       'upload', 'save', 'wasm']
 			      .concat(window.showDirectoryPicker ? ['pickfolder'] : []),
 		}),
@@ -1738,6 +1877,11 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 			await ask('session-rename', { session: body.slice(0, nl), title: body.slice(nl + 1) });
 			return json({ ok: true });
 		}
+		if (path === '/api/session/mark') {
+			const nl = body.indexOf('\n');
+			const r = await ask('session-mark', { session: body.slice(0, nl), mark: body.slice(nl + 1) });
+			return json({ ok: !!(r && r.ok) });
+		}
 		if (path === '/api/upload') {
 			/* Text only: the store holds strings. */
 			const name = (query.get('name') || 'file').split('/').pop();
@@ -1869,14 +2013,18 @@ const tray = $('tray');
 
 /* ---------- settings: on this device only, never sent anywhere ---------- */
 const SETTINGS_KEY = 'hako.studio.settings';
-/* theme_picked: a theme chosen here, not the default; side_off: the menu folded away */
-const defaults = { theme: 'terminal', theme_picked: false, modelPaths: [], consented: false, spinner: 'braille', side_off: false, voice: false };
+/* theme_picked: a theme chosen here, not the default; appearance: light, dark or
+   auto (the system's) for the two themes that have both; side_off: the menu folded
+   away; pins/archived: session ids; name/avatar: the profile, on this device only */
+const defaults = { theme: 'mithraeum', theme_picked: false, appearance: 'auto', modelPaths: [], consented: false, spinner: 'braille',
+                   side_off: false, voice: false, pins: [], archived: [], name: '', avatar: '' };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
-/* Before 10-29 every page saved its theme on load, picked or not, so washi (the old
-   default) is in nearly every browser. The default is terminal now: a saved theme
-   counts only once someone picked it. */
-if (!settings.theme_picked) settings.theme = 'terminal';
+/* Before 10-29 every page saved its theme on load, picked or not, so washi (an old
+   default) is in nearly every browser. A saved theme counts only once someone picked
+   it; everyone else gets the default, mithraeum. */
+if (!settings.theme_picked) settings.theme = 'mithraeum';
+for (const k of ['pins', 'archived']) if (!Array.isArray(settings[k])) settings[k] = [];
 function saveSettings() {
 	try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
 }
@@ -1905,16 +2053,19 @@ const THEMES = {
 	kanagawa: { bg:'#1f1f28', panel:'#27262e', 'panel-2':'#2e2e34', line:'#3b3b3e', 'line-2':'#494748', bone:'#dcd7ba', gold:'#957fb8', 'gold-dim':'#6c5d86', phos:'#98bb6c', dim:'#727169', faint:'#54546d', err:'#d0564a', ink:'#1f1f28' }
 };
 /* THEMES:END */
-/* terminal, the default everywhere: in a terminal it is the profile's own colors;
-   in a browser, a plain neutral that follows the system's light or dark, with none
-   of our inks. Kept out of the generated block above, and it wins over any
-   `terminal` entry there. */
+/* Two themes come in a light and a dark, picked by settings.appearance (auto = the
+   system's). mithraeum, the default: the site's paper by day, night in the dark (the
+   generated washi and mithraeum above). terminal: plain black and white, none of our
+   inks; in a terminal it is the profile's own colors. Kept out of the generated block,
+   and they win over its entries of the same name. */
 const darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 const TERMINAL = {
 	light: { bg:'#ffffff', panel:'#f7f7f7', 'panel-2':'#ececec', line:'#e3e3e3', 'line-2':'#cccccc', bone:'#1d1d1f', gold:'#1d1d1f', 'gold-dim':'#8e8e93', phos:'#636366', dim:'#6e6e73', faint:'#9a9aa0', err:'#c9302c', ink:'#ffffff' },
 	dark:  { bg:'#1c1c1e', panel:'#232325', 'panel-2':'#2c2c2e', line:'#38383a', 'line-2':'#48484a', bone:'#e5e5e7', gold:'#e5e5e7', 'gold-dim':'#8e8e93', phos:'#a1a1a6', dim:'#98989d', faint:'#6e6e73', err:'#ff6961', ink:'#1c1c1e' },
 };
-const themeNames = () => ['terminal'].concat(Object.keys(THEMES).filter((n) => n !== 'terminal'));
+const PAIRS = { mithraeum: { light: THEMES.washi, dark: THEMES.mithraeum }, terminal: TERMINAL };
+const isDark = () => settings.appearance === 'dark' || (settings.appearance !== 'light' && !!(darkMq && darkMq.matches));
+const themeNames = () => ['mithraeum', 'terminal'].concat(Object.keys(THEMES).filter((n) => !PAIRS[n]));
 /* hex arithmetic for a custom rc theme's derived shades */
 const mix = (a, b, t) => {
 	const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -1932,10 +2083,10 @@ function slotsTheme(sl) {
 	         dim: sl.sys || sl.comment || mix(fg, bg, .4), faint: sl.ghost || sl.meta || mix(fg, bg, .55), err: sl.err || '#ff6961', ink: bg };
 }
 function themeVars(name, slots) {
-	if (name === 'terminal' || !name) return TERMINAL[darkMq && darkMq.matches ? 'dark' : 'light'];
+	if (PAIRS[name]) return PAIRS[name][isDark() ? 'dark' : 'light'];
 	if (THEMES[name]) return THEMES[name];
 	if (slots && typeof slots === 'object' && Object.keys(slots).length) return slotsTheme(slots);
-	return TERMINAL[darkMq && darkMq.matches ? 'dark' : 'light'];
+	return PAIRS.mithraeum[isDark() ? 'dark' : 'light'];
 }
 let themeShown = '';
 function paintTheme(name, slots) {
@@ -1943,7 +2094,7 @@ function paintTheme(name, slots) {
 	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
 	const tc = document.querySelector('meta[name="theme-color"]');
 	if (tc) tc.content = t.bg;
-	themeShown = name || 'terminal';
+	themeShown = name || 'mithraeum';
 }
 /* A pick in settings. The rc's own theme (state.theme) decides unless this browser
    picked one; under hako --serve a pick is written to the rc, so the two agree. */
@@ -3028,12 +3179,12 @@ function openSettings() {
 		if (!HAKO_WASM_MODE) post('/api/theme', settings.theme);
 		flashStatus('theme: ' + settings.theme);
 	};
-	/* terminal first (the default), then the presets, then the rc's own theme if it is a custom one */
+	/* mithraeum first (the default), terminal, then the presets, then the rc's own theme if it is a custom one */
 	const names = themeNames();
 	if (state.theme && !names.includes(state.theme) && state.theme_slots) names.push(state.theme);
 	names.forEach((name) => {
 		const t = themeVars(name, name === state.theme ? state.theme_slots : null);
-		const b = optionRow(name, name === 'terminal' ? 'follows light or dark' : '', '', () => {
+		const b = optionRow(name, name === 'mithraeum' ? 'paper by day, night in the dark' : name === 'terminal' ? 'plain black and white' : '', '', () => {
 			applyTheme(name, true);
 			if (name === state.theme && state.theme_slots) paintTheme(name, state.theme_slots);
 			for (const [n, row, label] of themeRows) {
@@ -3049,6 +3200,18 @@ function openSettings() {
 			b.insertBefore(sw, b.firstChild);
 		});
 		m.body.appendChild(b);
+	});
+	/* light, dark or the system's, for mithraeum and terminal (the rest have one look) */
+	m.body.appendChild(groupLabel('light or dark'));
+	const looks = [];
+	[['auto', 'follows this device'], ['light', ''], ['dark', '']].forEach(([a, sub]) => {
+		const r = optionRow(a, sub, '', () => {
+			settings.appearance = a; saveSettings();
+			const [n, sl] = effectiveTheme(); paintTheme(n, sl);
+			for (const [x, row] of looks) { row.classList.toggle('sel', x === a); row.firstChild.nodeValue = (x === a ? '\u25ce ' : '  ') + x; }
+		}, settings.appearance === a);
+		looks.push([a, r]);
+		m.body.appendChild(r);
 	});
 
 	/* Read aloud: the device's own voices (speechSynthesis), nothing leaves it. */
@@ -3281,6 +3444,7 @@ function confirmDelete(s) {
 		m.close();
 		const r = await post('/api/session/delete', s.id);
 		if (r && r.ok) {
+			toggleIn('pins', s.id, false); toggleIn('archived', s.id, false);
 			if (s.id === state.session) { clearLog(); post('/api/slash', ':session new'); }
 			loadSessions();
 		} else add('turn error', '', 'could not delete ' + s.id);
@@ -3309,43 +3473,145 @@ async function loadSessions() {
 	loadFiles();
 }
 const isCodeCore = () => !HAKO_WASM_MODE || !!REMOTE_ID;    /* hako on a computer, not this browser's own */
+/* A small menu at what was tapped. items: [label, fn, cls] or 'sep'. */
+let popEl = null;
+function closePop() { if (popEl) { popEl.remove(); popEl = null; document.querySelectorAll('.act.open').forEach((x) => x.classList.remove('open')); } }
+function popMenu(anchor, items, up) {
+	closePop();
+	const m = document.createElement('div');
+	m.className = 'pop'; m.setAttribute('role', 'menu');
+	for (const it of items) {
+		if (!it) continue;
+		if (it === 'sep') { m.appendChild(document.createElement('hr')); continue; }
+		const b = mb(it[0], it[2] || '', (e) => { e.stopPropagation(); closePop(); it[1](); });
+		b.type = 'button'; b.setAttribute('role', 'menuitem');
+		m.appendChild(b);
+	}
+	document.body.appendChild(m);
+	popEl = m;
+	const r = anchor.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+	const top = up || r.bottom + h + 8 > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4;
+	m.style.top = top + 'px';
+	m.style.left = Math.max(8, Math.min(innerWidth - w - 8, up ? r.left : r.right - w)) + 'px';
+	setTimeout(() => { const off = (e) => { if (popEl && !popEl.contains(e.target)) { closePop(); document.removeEventListener('pointerdown', off, true); } };
+		document.addEventListener('pointerdown', off, true); }, 0);
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
+
+/* Pinned and archived: hako keeps them next to the chat (a .mark sidecar), so every
+   device on that computer sees the same list. A hako too old for that ("mark" not in
+   caps) gets this browser's own view, kept in settings by id. */
+const markKept = () => caps.has('mark');
+const markOf = (s) => markKept() ? (s.mark || '') : settings.pins.includes(s.id) ? 'pinned' : settings.archived.includes(s.id) ? 'archived' : '';
+const isPinned = (s) => markOf(s) === 'pinned', isArchived = (s) => markOf(s) === 'archived';
+function toggleIn(key, id, on) {
+	settings[key] = settings[key].filter((x) => x !== id);
+	if (on) settings[key].unshift(id);
+	saveSettings();
+}
+async function setMark(s, mark) {
+	if (!markKept()) { toggleIn('pins', s.id, mark === 'pinned'); toggleIn('archived', s.id, mark === 'archived'); return true; }
+	const r = await post('/api/session/mark', s.id + '\n' + mark);
+	const j = r && await r.json().catch(() => null);
+	if (!(j && j.ok)) { add('turn error', '', 'could not ' + (mark ? mark.replace(/ed$/, '') : 'change') + ' ' + s.id); return false; }
+	s.mark = mark || undefined;
+	return true;
+}
+function sessionMenu(s, anchor, after) {
+	const set = async (mark) => { if (await setMark(s, mark)) { renderSessions(); if (after) after(); } };
+	popMenu(anchor, [
+		[isPinned(s) ? 'unpin' : 'pin', () => set(isPinned(s) ? '' : 'pinned')],
+		['rename', () => renameSession(s)],
+		[isArchived(s) ? 'unarchive' : 'archive', () => set(isArchived(s) ? '' : 'archived')],
+		'sep',
+		['delete', () => confirmDelete(s), 'danger'],
+	]);
+}
+function sessionRow(s, onPick, after) {
+	const cur = s.id === state.session;
+	const row = document.createElement('div');
+	row.className = 'sessrow';
+	const b = document.createElement('button');
+	b.className = 'sess' + (cur ? ' cur' : '') + (HAKO_WASM_MODE ? (REMOTE_ID ? ' k-code' : ' k-chat') : '');
+	b.title = s.id;
+	const nm = document.createElement('span');
+	nm.className = 'nm';
+	nm.textContent = (cur && state.session_name) || s.title;
+	const w = document.createElement('span');
+	w.className = 'when';
+	w.textContent = when(s.mtime);
+	b.append(nm, w);
+	b.addEventListener('click', () => { closeNav(); if (onPick) onPick(); resumeSession(s.id); });
+	const more = document.createElement('button');
+	more.className = 'act more';
+	more.type = 'button';
+	more.title = 'pin, rename, archive or delete';
+	more.setAttribute('aria-label', 'more for ' + nm.textContent);
+	more.textContent = '\u22ef';
+	more.addEventListener('click', (e) => { e.stopPropagation(); more.classList.add('open'); sessionMenu(s, more, after); });
+	row.append(b, more);
+	return row;
+}
+const RECENT_N = 12;
+const searchQuery = () => { const box = $('search'); return box && !$('searchbox').hidden ? (box.value || '').trim().toLowerCase() : ''; };
+const matches = (s, q) => !q || String((s.id === state.session && state.session_name) || s.title || '').toLowerCase().includes(q);
+/* The menu: pinned first, then the newest chats; the rest (and the archive) under
+   "view all". A search looks through every chat that is not archived. */
 function renderSessions() {
+	const q = searchQuery();
+	const live = sessionList.filter((s) => !isArchived(s) && matches(s, q));
+	const pins = live.filter(isPinned), rest = live.filter((s) => !isPinned(s));
+	const shown = q ? rest : rest.slice(0, RECENT_N);
+	const pinEl = $('pinned');
+	pinEl.textContent = '';
+	pins.forEach((s) => pinEl.appendChild(sessionRow(s)));
+	$('pinned-wrap').hidden = !pins.length;
 	sessionsEl.textContent = '';
-	sessionList.forEach((s) => {
-		const cur = s.id === state.session;
-		const row = document.createElement('div');
-		row.className = 'sessrow';
-
-		const b = document.createElement('button');
-		b.className = 'sess' + (cur ? ' cur' : '') + (HAKO_WASM_MODE ? (REMOTE_ID ? ' k-code' : ' k-chat') : '');
-		b.title = s.id;
-		const nm = document.createElement('span');
-		nm.className = 'nm';
-		nm.textContent = (cur && state.session_name) || s.title;
-		const w = document.createElement('span');
-		w.className = 'when';
-		w.textContent = when(s.mtime);
-		b.append(nm, w);
-		b.addEventListener('click', () => { closeNav(); resumeSession(s.id); });
-
-		const ren = document.createElement('button');
-		ren.className = 'act ren';
-		ren.title = 'rename this session';
-		ren.textContent = '✎';
-		ren.addEventListener('click', (e) => { e.stopPropagation(); renameSession(s); });
-
-		const del = document.createElement('button');
-		del.className = 'act del';
-		del.title = 'delete this session';
-		del.textContent = '×';
-		del.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete(s); });
-
-		row.append(b, ren, del);
-		sessionsEl.appendChild(row);
-	});
+	shown.forEach((s) => sessionsEl.appendChild(sessionRow(s)));
 	if (!sessionList.length)
 		sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: REMOTE_ID || !HAKO_WASM_MODE ? 'no chats in this folder yet' : 'no chats yet' }));
+	else if (q && !live.length)
+		sessionsEl.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'no chats match' }));
+	const hiddenN = sessionList.length - pins.length - shown.length;
+	const all = $('btn-all');
+	all.hidden = q ? true : hiddenN <= 0;
+	all.textContent = 'view all' + (hiddenN > 0 ? ' \u00b7 ' + sessionList.length : '');
 	applySearch();
+}
+/* Every chat in one place: search, the archive, the same menu per row. */
+function openAllChats() {
+	closeNav();
+	const m = modal('all chats');
+	let tab = 'chats';
+	const box = document.createElement('div');
+	box.style.padding = '.35rem .55rem';
+	const inp = document.createElement('input');
+	inp.type = 'search'; inp.placeholder = 'search chats'; inp.autocomplete = 'off'; inp.spellcheck = false;
+	box.appendChild(inp);
+	const tabs = document.createElement('div');
+	tabs.className = 'tabs';
+	const list = document.createElement('div');
+	list.className = 'sessions';
+	const draw = () => {
+		const q = inp.value.trim().toLowerCase();
+		const rows = sessionList.filter((s) => (tab === 'archived') === isArchived(s) && matches(s, q));
+		tabs.textContent = '';
+		for (const [t, n] of [['chats', sessionList.filter((s) => !isArchived(s)).length], ['archived', sessionList.filter(isArchived).length]]) {
+			const b = mb(t + ' ' + n, t === tab ? 'on' : '', () => { tab = t; draw(); });
+			b.type = 'button';
+			tabs.appendChild(b);
+		}
+		list.textContent = '';
+		rows.forEach((s) => list.appendChild(sessionRow(s, m.close, draw)));
+		if (!rows.length) list.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+			textContent: q ? 'no chats match' : tab === 'archived' ? 'nothing archived. archive a chat from its \u22ef menu to tuck it away here' : 'no chats yet' }));
+	};
+	inp.addEventListener('input', draw);
+	m.body.append(box, tabs, list);
+	draw();
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('done', 'primary', m.close));
+	if (!narrow()) setTimeout(() => inp.focus(), 0);
 }
 
 /* The working folder's newest files, as cards on the landing. A tap puts the
@@ -3860,7 +4126,7 @@ function applySearch() {
 	const box = $('search');
 	const q = box && !$('searchbox').hidden ? (box.value || '').trim().toLowerCase() : '';
 	if (!document.querySelectorAll) return;
-	for (const row of document.querySelectorAll('#recents .sessrow, #project-list > .sess'))
+	for (const row of document.querySelectorAll('#project-list > .sess'))
 		row.hidden = !!q && !(row.textContent || '').toLowerCase().includes(q);
 }
 
@@ -3972,14 +4238,15 @@ $('btn-dir').addEventListener('click', () => { closeNav(); openBrowser(); });
 $('btn-search').addEventListener('click', () => {
 	const box = $('searchbox');
 	box.hidden = !box.hidden;
-	if (box.hidden) { $('search').value = ''; applySearch(); }
+	if (box.hidden) { $('search').value = ''; renderSessions(); }
 	else $('search').focus();
 });
-$('search').addEventListener('input', applySearch);
+$('search').addEventListener('input', renderSessions);
+$('btn-all').addEventListener('click', openAllChats);
 $('search').addEventListener('keydown', (e) => {
 	if (e.key !== 'Escape') return;
 	e.stopPropagation();
-	$('search').value = ''; $('searchbox').hidden = true; applySearch();
+	$('search').value = ''; $('searchbox').hidden = true; renderSessions();
 });
 /* Straight to the system picker — the browser's own file sheet is better than
    anything we can draw, and on iOS it is Files/Photos. Attaching a file that is
@@ -4011,7 +4278,7 @@ document.addEventListener('drop', (e) => {
 	e.preventDefault();
 	files.forEach((f) => attach(f.name, f));
 });
-$('btn-settings').addEventListener('click', () => { closeNav(); openSettings(); });
+renderUser();
 $('btn-new').addEventListener('click', () => {
 	closeNav();
 	if (codeLanding()) { input.focus(); return; }

@@ -312,7 +312,7 @@ self.onmessage = async (ev) => {
 		}
 		if (msg.type === 'session-delete') {
 			for (const p of storage.list(projectDir())) {
-				if (p.endsWith('/' + msg.session + '.jsonl') || p.endsWith('/' + msg.session + '.title'))
+				if (['.jsonl', '.title', '.mark'].some((x) => p.endsWith('/' + msg.session + x)))
 					storage.remove(p);
 			}
 			if (sessionId === msg.session) sessionId = null;
@@ -330,6 +330,19 @@ self.onmessage = async (ev) => {
 			}
 			await storage.flush();
 			self.postMessage({ type: 'sessions', id: msg.id, sessions: [] });
+			return;
+		}
+		if (msg.type === 'session-mark') {
+			/* pinned or archived, beside the chat the way hako keeps it; "" clears */
+			const mark = msg.mark || '';
+			const p = storage.list(projectDir()).find((x) => x.endsWith('/' + msg.session + '.jsonl'));
+			const ok = !!p && ['', 'pinned', 'archived'].includes(mark);
+			if (ok) {
+				const side = p.replace(/\.jsonl$/, '.mark');
+				if (mark) storage.write(side, mark + '\n', false); else storage.remove(side);
+				await storage.flush();
+			}
+			self.postMessage({ type: 'ok', id: msg.id, ok });
 			return;
 		}
 		if (msg.type === 'sessions') {
@@ -355,7 +368,9 @@ self.onmessage = async (ev) => {
 				/* OPFS keeps no mtime; the id starts with its creation time in hex. */
 				const born = parseInt(id.slice(0, 8), 16);
 				if (!title) continue;   /* every page load opens one; one with no prompt in it is noise, the open one too */
-				out.push({ id, title, mtime: born > 1e9 ? born : 0, turns, path: p });
+				const mark = (storage.read(p.replace(/\.jsonl$/, '.mark')) || '').trim();
+				out.push({ id, title, mtime: born > 1e9 ? born : 0, turns, path: p,
+				           ...(mark === 'pinned' || mark === 'archived' ? { mark } : {}) });
 			}
 			self.postMessage({ type: 'sessions', id: msg.id, sessions: out });
 			return;
