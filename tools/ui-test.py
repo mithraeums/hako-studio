@@ -53,6 +53,13 @@ with sync_playwright() as p:
         pg.goto(U); pg.wait_for_timeout(1500)
         ck(not errs, f"[{name}] page loads with no JS errors {errs[:2]}")
         ck(pg.evaluate("document.documentElement.scrollWidth") <= vp['width'], f"[{name}] no sideways scroll")
+        # a touch screen reacts to taps, not hovers: every :hover rule is for pointers only
+        loose = pg.evaluate("""(() => { const out = [];
+            const walk = (rules, gated) => { for (const r of rules) {
+                if (r.cssRules && r.media) walk(r.cssRules, gated || /hover:\\s*hover/.test(r.media.mediaText));
+                else if (r.selectorText && r.selectorText.includes(':hover') && !gated) out.push(r.selectorText); } };
+            for (const s of document.styleSheets) walk(s.cssRules, false); return out; })()""")
+        ck(not loose, f"[{name}] every :hover style sits in @media (hover: hover), so a tap never leaves one stuck {loose[:3]}")
         if name == "phone":
             # the keyboard opens: iOS shrinks the visible box to 420 and pans it 360 down to show the field
             box = lambda: pg.evaluate("""(() => { const b = document.body.getBoundingClientRect(), f = $('form').getBoundingClientRect();
@@ -97,6 +104,16 @@ with sync_playwright() as p:
             wm = pg.evaluate("(() => { const s = document.querySelector('#hmark svg'); return s ? s.getBoundingClientRect().right : 0; })()")
             tl = pg.evaluate("document.getElementById('title').getBoundingClientRect().left")
             ck(wm and wm <= tl + 0.5, f"[phone] a long session title never runs under the wordmark ({wm:.0f} <= {tl:.0f})")
+            # 11-04 on the iPhone: the keyboard came up over the profile sheet and its name field
+            # sat under it: the sheet was laid out on the whole screen, not the visible box, and once
+            # the page undoes iOS's scroll the box is back at the top (offset 0, 420 tall)
+            pg.evaluate("openProfile()"); pg.wait_for_timeout(200)
+            pg.evaluate("__vv.height = 420; __vv.offsetTop = 0; __vv.dispatchEvent(new Event('resize')); __vv.dispatchEvent(new Event('scroll'))")
+            pg.wait_for_timeout(200)
+            r = pg.evaluate("(() => { const i = document.querySelector('.modal .profile input:not([type=file])'), r = i && i.getBoundingClientRect(); return r && [Math.round(r.top), Math.round(r.bottom)]; })()")
+            ck(r and r[0] >= 0 and r[1] <= 420, f"[phone] with the keyboard up the profile name field is above it, in the visible box 0-420 ({r})")
+            pg.evaluate("__vv.height = 844; __vv.offsetTop = 0; __vv.dispatchEvent(new Event('resize'))")
+            pg.keyboard.press('Escape'); pg.wait_for_timeout(150)
             ck(not errs, f"[phone] no JS errors {errs[:2]}")
             pg.close(); continue
         bg = lambda: pg.evaluate("getComputedStyle(document.body).backgroundColor")
@@ -242,6 +259,14 @@ with sync_playwright() as p:
         pg.evaluate("takeState({ remote: 1, update: { current: '0.2.10', latest: '0.2.11' } })"); pg.wait_for_timeout(100)
         ck("remote" in pg.inner_text('#ind') and "0.2.11" in pg.inner_text('#ind'), f"remote and an update show quietly in the header ({pg.inner_text('#ind')!r})")
         pg.evaluate("takeState({ theme: 'gruvbox', theme_slots: null, remote: 0, update: null })")
+        # 11-04 on the phone: every tap on the chat already open resumed it again (a "resumed" line each time on the desktop)
+        sent = []; on_req = lambda q: sent.append(q.post_data or '') if q.url.endswith('/api/slash') else None
+        pg.on('request', on_req)
+        cur = pg.locator('#sessions .sess.cur')
+        if cur.count(): cur.first.click(); pg.wait_for_timeout(400)
+        pg.remove_listener('request', on_req)
+        ck(cur.count() and not any(':resume' in x for x in sent) and pg.locator('#log .turn.user').count(),
+           f"tapping the chat that is already open just shows it, no :resume ({sent}, {cur.count()}, {pg.locator('#log .turn.user').count()})")
         pg.locator('#sessions .sessrow').first.hover(); pg.locator('#sessions .sessrow .act.more').first.click(); pg.wait_for_timeout(200)
         pg.locator('.pop button', has_text='rename').click(); pg.wait_for_timeout(300)
         pg.fill('.modal input', 'pong night'); pg.keyboard.press('Enter'); pg.wait_for_timeout(1500)

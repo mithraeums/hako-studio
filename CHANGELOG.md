@@ -6,6 +6,13 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
+### changed
+- on a touch screen nothing reacts to where a finger was: hover styling is for mouse and trackpad only, and a tap dims what it pressed
+
+### fixed
+- on a phone the keyboard no longer covers a sheet's field (the profile name, sign-in, pairing): sheets sit in the visible part of the screen, like the composer
+- tapping the chat that is already open just shows it: it resumed it again, and a remote session's desktop printed "resumed" for every tap
+
 ## [v0.1.1] - 2026-11-04
 
 ### added

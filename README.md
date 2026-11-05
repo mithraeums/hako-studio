@@ -2,7 +2,7 @@
   <a href="https://mithraeums.github.io">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://mithraeums.github.io/assets/banner-hako-studio-night.png"/>
-      <img src="https://mithraeums.github.io/assets/banner-hako-studio.png" alt="hako studio — the agent in a browser, for every device you own" width="100%"/>
+      <img src="https://mithraeums.github.io/assets/banner-hako-studio.png" alt="hako studio: the agent in a browser, for every device you own" width="100%"/>
     </picture>
   </a>
 </p>
@@ -12,10 +12,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.0-e2402e?style=flat-square&labelColor=14130f" alt="v0.1.0"/>
-  <img src="https://img.shields.io/badge/license-GPL--3.0-2636c4?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
-  <img src="https://img.shields.io/badge/UI-single%20file-2636c4?style=flat-square&labelColor=14130f" alt="single file UI"/>
-  <img src="https://img.shields.io/badge/deps-none-2636c4?style=flat-square&labelColor=14130f" alt="no dependencies"/>
+  <img src="https://img.shields.io/badge/version-v0.1.0-ece7da?style=flat-square&labelColor=14130f" alt="v0.1.0"/>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
+  <img src="https://img.shields.io/badge/UI-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="single file UI"/>
+  <img src="https://img.shields.io/badge/deps-none-ece7da?style=flat-square&labelColor=14130f" alt="no dependencies"/>
 </p>
 
 <p align="center">
@@ -61,8 +61,8 @@
 
 <table>
   <tr>
-    <td width="33%" valign="top"><b>No backend.</b><br/><sub>Static files and your own device. No database, no account, no telemetry, nothing proxied. A conversation, a key and a file never reach a server of ours — there isn't one.</sub></td>
-    <td width="33%" valign="top"><b>One agent, three shapes.</b><br/><sub>The same <code>hako.c</code> compiled natively and to WebAssembly. Hosted page, container, or <code>hako --serve</code> — same loop, same tools, same session format. Nothing reimplemented in JavaScript.</sub></td>
+    <td width="33%" valign="top"><b>No backend.</b><br/><sub>Static files and your own device. No database, no account, no telemetry, nothing proxied. A conversation, a key and a file never reach a server of ours; there isn't one.</sub></td>
+    <td width="33%" valign="top"><b>One agent, three shapes.</b><br/><sub>The same <code>hako.c</code> compiled natively and to WebAssembly. Hosted page, container, or <code>hako --serve</code>: same loop, same tools, same session format. Nothing reimplemented in JavaScript.</sub></td>
     <td width="33%" valign="top"><b>Every device you own.</b><br/><sub>Run it from the machine with your files and drive it from the couch, or open the page on a phone and let the agent run there. <code>--token</code> when it leaves the loopback.</sub></td>
   </tr>
 </table>
@@ -71,7 +71,7 @@
 
 ## Overview
 
-- **Three ways to run it, one piece of software.** `hako.c` is compiled twice —
+- **Three ways to run it, one piece of software.** `hako.c` is compiled twice:
   natively for the binary, and to WebAssembly for the browser. What differs is
   only what sits underneath, which is what decides whether there is a shell and
   a real filesystem.
@@ -79,33 +79,33 @@
   | | how | files | shell · local models |
   |---|---|---|---|
   | **hosted** | a static page, e.g. `hako.mithraeum.studio` | browser storage, or a folder you grant (Chromium desktop) | no |
-  | **container** | `docker run -p 8080:80 hako-studio` | same as hosted — the agent runs in *your* browser, not in the container | no |
+  | **container** | `docker run -p 8080:80 hako-studio` | same as hosted: the agent runs in *your* browser, not in the container | no |
   | **binary** | `hako --serve` | real folders on that machine | yes |
 
 - **What the browser build cannot do**, because a browser sandbox does not permit
   it: run a shell, run local hako models (a subprocess), or complete an OAuth
   sign-in (provider token endpoints refuse cross-origin requests). It takes API
   keys, and those go from the page straight to the provider. Work is kept in
-  browser storage unless a real folder is granted — **clearing site data erases
+  browser storage unless a real folder is granted; **clearing site data erases
   it**, so save what matters out of the files list.
 - **It *is* the agent.** `hako --serve` is a mode of the agent binary, not a wrapper around it:
   the same loop, providers, tools and session format that run in the terminal, carried to the
   browser over HTTP + Server-Sent Events. Nothing is reimplemented in JavaScript, and there is
   no child process to keep alive. Update `hako`, and studio updates with it. In the browser the
-  same code runs as WebAssembly against a platform seam — a JS reimplementation of the agent
+  same code runs as WebAssembly against a platform seam. A JS reimplementation of the agent
   loop is the one change this project will not take.
 - **Shared state with the CLI** *(binary)*. Sessions, `~/.hako/credentials`, skills, `~/.hakorc`
   and per-project trust are the same files the terminal uses. `:resume` in either surface picks
   up the other's conversation. In the browser the same layout exists, in that origin's storage.
 - **Tool calls ask first** *(binary)*. Every `write_file`, `edit_file`, `run_shell` and read
-  pauses for **allow once · deny · always**, mirroring the CLI's `y`/`n`/`a` scoping —
+  pauses for **allow once · deny · always**, mirroring the CLI's `y`/`n`/`a` scoping:
   project-wide for reads and writes, exact-command for shell. A wasm turn cannot pause to ask,
   so the browser build does not gate: there the boundary is the sandbox itself.
 - **Any folder, per-folder sessions.** Browse, open a project, and the sidebar lists that
   project's conversations. Resume renders the full stored transcript; delete removes the jsonl.
   A session belongs to a directory, never to a provider or a model.
 - **Local models first** *(binary)*. Installed weights, loose `.mlf2` files found in `~/Downloads`
-  or any folder you add (symlinked into place — never copied, never moved), and `:pull` for the
+  or any folder you add (symlinked into place, never copied, never moved), and `:pull` for the
   rest. Cloud catalogs come from the provider. The browser build lists only what a page can
   reach, so local models and OAuth providers are hidden there rather than offered and broken.
 - **Themes from the one rc.** `terminal` by default (a plain palette that follows your system's
@@ -119,11 +119,11 @@
   Every byte is sealed in the tab (Noise, by `hako.wasm`) and opened only by your computer; the
   relay in between routes ciphertext and keeps no chats. Details below.
 - **Works on a phone.** Drawer navigation, touch targets, keyboard-aware layout, add-to-home-screen.
-  Serve it from the machine you are sitting at and drive it from the couch — or open the hosted
+  Serve it from the machine you are sitting at and drive it from the couch, or open the hosted
   page and let the agent run on the phone itself.
 - **Nothing to install.** libc and pthread. No framework, no CDN, no build step for the page.
-  The UI is one HTML file, compiled into the binary — so a single executable is the whole
-  product — and the same file is what the hosted page and the container serve.
+  The UI is one HTML file, compiled into the binary, so a single executable is the whole
+  product, and the same file is what the hosted page and the container serve.
 
 <p align="center"><sub><b>—— II ——</b></sub></p>
 
@@ -136,12 +136,12 @@ make            # build hako.wasm and assemble dist/
 make serve      # dist/ on http://localhost:8080, nothing cached
 make serve-tls  # the same over self-signed HTTPS, for a phone (OPFS needs a secure context)
 make docker     # container image serving dist/
-make test       # bundle sanity, the wasm behaviour tests, theme sync, and the browser test
+make test       # bundle sanity, the wasm behavior tests, theme sync, and the browser test
 ```
 
 `make test` runs `make check` (one file, nothing external, plus node tests of the wasm) and,
 when playwright and a built `../hako-code/hako` are present, `make ui-test`: a headless
-browser drives the page against `hako --serve` and a fake engine — a turn, an approval, a
+browser drives the page against `hako --serve` and a fake engine: a turn, an approval, a
 picker, uploads, desktop and phone widths, no JS errors.
 
 The hosted page at hako.mithraeum.studio is rebuilt every night from hako-code `main`.
@@ -155,7 +155,7 @@ framework, and no build step for the page itself.
 The wasm is built from [`hako-code`](https://github.com/mithraeums/hako-code):
 a checkout beside this one wins, otherwise the released source is fetched.
 **That source must carry the platform seam** (`hk_http` / `hk_fs` / `hk_shell` /
-`hk_time`) — hako-code v0.2.3 or newer. Against anything older the wasm build
+`hk_time`): hako-code v0.2.3 or newer. Against anything older the wasm build
 fails on a missing POSIX header.
 
 ### From the binary
@@ -171,7 +171,7 @@ hako --serve --dir ~/code/my-project
 ```
 --serve        start hako studio
 --port N       listen port (default 8787)
---bind ADDR    bind address (default 127.0.0.1 — anything else exposes the agent)
+--bind ADDR    bind address (default 127.0.0.1; anything else exposes the agent)
 --dir PATH     project to open
 --web DIR      serve DIR/index.html instead of the built-in bundle (UI work)
 --yolo         auto-approve every tool call
@@ -231,12 +231,12 @@ path in Chromium and WebKit. To use your own, point hako at it with `HAKO_RELAY_
 macOS blocks inbound connections to an **unsigned** binary while leaving loopback alone, and it
 does it silently: the TCP handshake completes, then the socket is dead by the first read. The
 phone spins forever, nothing is logged, and every layer above looks broken. Under `--debug` the
-tell is `read=-1 errno=57` (ENOTCONN) — or no request at all.
+tell is `read=-1 errno=57` (ENOTCONN), or no request at all.
 
 `make` therefore signs the binary on macOS, and prefers a stable identity over an ad-hoc one:
 
 ```sh
-# once — a self-signed code-signing identity called "hako-dev"
+# once: a self-signed code-signing identity called "hako-dev"
 D=~/.hako/codesign && mkdir -p $D && chmod 700 $D && cd $D
 openssl req -new -newkey rsa:2048 -nodes -keyout hako-dev.key -x509 -days 3650 \
   -out hako-dev.crt -subj "/CN=hako-dev/O=mithraeum" \
@@ -246,7 +246,7 @@ openssl pkcs12 -export -inkey hako-dev.key -in hako-dev.crt -out hako-dev.p12 \
 security import hako-dev.p12 -k ~/Library/Keychains/login.keychain-db -P hakodev -T /usr/bin/codesign
 ```
 
-Then allow it through the firewall **once** (the firewall stays on — this is one entry):
+Then allow it through the firewall **once** (the firewall stays on; this is one entry):
 
 ```sh
 H=/full/path/to/hako
@@ -254,7 +254,7 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$H"
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$H"
 ```
 
-The first `make` after that raises a keychain prompt — answer **Always Allow**, not "Allow".
+The first `make` after that raises a keychain prompt: answer **Always Allow**, not "Allow".
 
 Why the certificate rather than the ad-hoc signature `codesign -s -` gives you: the firewall
 matches a *designated requirement*. With a certificate that is `identifier + certificate leaf`,
@@ -263,14 +263,14 @@ so every single rebuild invalidates the entry and the phone hangs again. Two fla
 the difference between "set it up once" and "sudo before every test".
 
 macOS notes:
-- Signing and the Rez icon are mutually exclusive — a resource fork makes `codesign` refuse the
-  binary — so the signed build carries no icon. `make SIGN=0` restores the old behaviour.
+- Signing and the Rez icon are mutually exclusive (a resource fork makes `codesign` refuse the
+  binary), so the signed build carries no icon. `make SIGN=0` restores the old behavior.
 - Loopback (`hako --serve` with no `--lan`) never needs any of this.
 
 Working on the UI itself:
 
 ```sh
-make dev        # run the agent with the UI served off disk — edit, reload, no rebuild
+make dev        # run the agent with the UI served off disk: edit, reload, no rebuild
 make embed      # index.html -> ../hako-code/hako_web.h (what the binary carries)
 make build      # embed, then rebuild the agent
 ```
@@ -297,16 +297,16 @@ Uploads land in the open project under a sanitized basename, never overwrite (co
 `-1`, `-2`), cap at 128 MB, stream to disk, and announce themselves in the transcript so the agent
 knows the file arrived. Add the page to your home screen and it runs chromeless with its own icon.
 
-`:login` and friends need a terminal — over `--serve` they answer "run this in the shell" rather
+`:login` and friends need a terminal; over `--serve` they answer "run this in the shell" rather
 than parking the agent on a stdin nobody can reach.
 
 Commands are the CLI's: `:` runs hako itself (`:trust`, `:usage`, `:sessions`, `:pull <model>`,
 `:help`) and `/` drives the model (`/compact`, `/retry`, every skill as `/<skill>`). Bare `:model`, `:provider` and `:theme` open the page's own pickers; `:sessions` and
-the model's own questions arrive as a choice box — tap an option and the agent carries on.
+the model's own questions arrive as a choice box: tap an option and the agent carries on.
 
 On a desktop Enter sends and Shift+Enter adds a line; on a touch device Enter is a newline and
 `send` sends. While a turn is running that button becomes `stop`. Under 720px the menu is a
-drawer, and the UI asks the agent what it supports before offering it — an older `hako` simply
+drawer, and the UI asks the agent what it supports before offering it, so an older `hako` simply
 shows fewer buttons.
 
 <p align="center"><sub><b>—— IV ——</b></sub></p>
@@ -325,7 +325,7 @@ browser localStorage                       theme, spinner, model search paths, m
 browser IndexedDB (hako-account)           when signed in: this device's key and your account key
 ```
 
-Running in a browser, in that origin's private storage — the same paths, in a
+Running in a browser, in that origin's private storage: the same paths, in a
 place no file manager can open:
 
 ```
@@ -341,7 +341,7 @@ desktop) puts your work on disk instead, while the key stays on the device and
 is never written into the folder.
 
 The server holds nothing. It keeps a 2048-event replay buffer in memory so a reload restores
-the current view, and that is all — no logging, no history of its own, nothing written to disk
+the current view, and that is all: no logging, no history of its own, nothing written to disk
 that `hako` did not write.
 
 With `:remote on`, the relay holds what the account needs to work and nothing else: a random
@@ -385,7 +385,7 @@ If you share the belief that simplicity empowers creativity, feel free to contri
 - Bug reports and feature requests
 
 Please ensure your code follows the existing style: C99, tabs, `snake_case` fields, no
-third-party libraries, and no agent logic in JavaScript — that belongs in `hako.c`.
+third-party libraries, and no agent logic in JavaScript; that belongs in `hako.c`.
 
 <p align="center"><sub><a href="LICENSE">— SEE LICENSE —</a> &nbsp;·&nbsp; GPL-3.0</sub></p>
 
