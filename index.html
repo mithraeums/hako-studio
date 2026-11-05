@@ -72,6 +72,12 @@
 	@supports (height: 100dvh) { html, body { height: 100dvh; } }
 	body { position: fixed; left: 0; right: 0; top: var(--vt, 0); height: var(--vh, 100dvh); }
 	button, .sess, .opt, .navrow, .card, .pill { touch-action: manipulation; }   /* no double-tap zoom */
+	/* A touch screen reacts to the tap, not to where a finger last was: hover styling is
+	   for pointers only (every :hover sits in @media (hover: hover)), and a press dims. */
+	* { -webkit-tap-highlight-color: transparent; }
+	@media (hover: none) {
+		button:active, .sess:active, .opt:active, .navrow:active, .card:active, .pill:active, .cmd:active, .crumb:active { opacity: .6; }
+	}
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 5px; }
 	::-webkit-scrollbar-track { background: transparent; }
@@ -81,10 +87,10 @@
 		font: inherit; cursor: pointer; border-radius: 6px; background: transparent;
 		color: var(--bone); border: 1px solid var(--line-2); padding: .3rem .6rem; font-size: 12px;
 	}
-	button:hover { border-color: var(--gold-dim); color: var(--gold); }
+	@media (hover: hover) { button:hover { border-color: var(--gold-dim); color: var(--gold); } }
 	button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 	button.primary { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 600; }
-	button.primary:hover { filter: brightness(1.1); color: var(--ink); }
+	@media (hover: hover) { button.primary:hover { filter: brightness(1.1); color: var(--ink); } }
 	button:disabled { opacity: .35; cursor: default; }
 	.grow { flex: 1; }
 
@@ -99,7 +105,7 @@
 		width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px;
 		color: var(--dim); background: transparent;
 	}
-	.ib:hover { color: var(--bone); background: var(--panel-2); border-color: transparent; }
+	@media (hover: hover) { .ib:hover { color: var(--bone); background: var(--panel-2); border-color: transparent; } }
 	.shead { display: flex; align-items: center; gap: .35rem; padding: .55rem .55rem .5rem; min-height: 50px; }
 	.wordmark { display: inline-flex; align-items: center; color: var(--gold); min-width: 0; }
 	.wordmark svg { display: block; height: 17px; width: auto; overflow: visible; }
@@ -116,8 +122,8 @@
 		color: var(--bone); font-size: 13px; background: transparent;
 	}
 	.navrow .i { color: var(--dim); }
-	.navrow:hover { background: var(--panel-2); color: var(--bone); border-color: transparent; }
-	.navrow:hover .i { color: var(--bone); }
+	@media (hover: hover) { .navrow:hover { background: var(--panel-2); color: var(--bone); border-color: transparent; } }
+	@media (hover: hover) { .navrow:hover .i { color: var(--bone); } }
 	.searchbox { padding: 0 .1rem .2rem; }
 	.searchbox input {
 		width: 100%; font: inherit; font-size: 13px; color: var(--bone); background: var(--bg);
@@ -138,7 +144,7 @@
 	}
 	.sess .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.sess .when { flex: none; color: var(--faint); font-size: 10.5px; }
-	.sess:hover { background: var(--panel-2); border-color: transparent; color: var(--bone); }
+	@media (hover: hover) { .sess:hover { background: var(--panel-2); border-color: transparent; color: var(--bone); } }
 	.sess.cur { background: var(--panel-2); color: var(--gold); }
 	/* signed in, a row says what it is: a code session (hako on a computer) or a chat in this browser */
 	.sess.k-code::before, .sess.k-chat::before { flex: none; width: 1em; }
@@ -154,7 +160,7 @@
 		.sessrow .act { visibility: hidden; }
 		.sessrow:hover .act, .sessrow:focus-within .act { visibility: visible; }
 	}
-	.sessrow .act:hover { border-color: var(--line); color: var(--bone); }
+	@media (hover: hover) { .sessrow .act:hover { border-color: var(--line); color: var(--bone); } }
 	.sessrow .act.open { visibility: visible; color: var(--bone); }
 	.allrow { color: var(--dim); font-size: 12.5px; padding-left: .55rem; }
 	.pinned .label { padding: .55rem .55rem .1rem; margin: 0; }
@@ -168,7 +174,7 @@
 		display: block; width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
 		color: var(--bone); font: inherit; font-size: 13px; padding: .45rem .6rem; border-radius: 7px;
 	}
-	.pop button:hover { background: var(--panel-2); border-color: transparent; }
+	@media (hover: hover) { .pop button:hover { background: var(--panel-2); border-color: transparent; } }
 	.pop button.danger { color: var(--err); }
 	.pop hr { border: 0; border-top: 1px solid var(--line); margin: .25rem .2rem; }
 	/* the user: a picture kept in this browser, or the name's first letter */
@@ -188,7 +194,7 @@
 	/* who is signed in, at the foot of the menu, like every app with accounts */
 	.acct { margin-top: auto; border-top: 1px solid var(--line); padding: .4rem; }
 	.acct button { display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; border-color: transparent; padding: .45rem .5rem; border-radius: 8px; }
-	.acct button:hover { border-color: transparent; background: var(--panel-2); }
+	@media (hover: hover) { .acct button:hover { border-color: transparent; background: var(--panel-2); } }
 	.acct .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.acct .who span { display: flex; align-items: center; gap: .3rem; color: var(--faint); font-size: 10px; }
 	.acct .who .mini { width: 10px; height: 10px; }
@@ -225,7 +231,7 @@
 		color: var(--dim); background: transparent; white-space: nowrap;
 	}
 	.ind .on::before { content: '\25CF\00a0'; color: var(--phos); font-size: 8px; vertical-align: 1px; }
-	.ind button:hover { color: var(--gold); border-color: var(--gold-dim); }
+	@media (hover: hover) { .ind button:hover { color: var(--gold); border-color: var(--gold-dim); } }
 
 	.stage { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 	#log {
@@ -261,7 +267,8 @@
 		color: var(--faint); display: inline-flex; align-items: center; justify-content: center;
 	}
 	.say svg.i { width: 14px; height: 14px; }
-	.say:hover, .say.on { color: var(--gold); background: var(--panel); }
+	.say.on { color: var(--gold); background: var(--panel); }
+	@media (hover: hover) { .say:hover { color: var(--gold); background: var(--panel); } }
 	.system { color: var(--dim); }
 	.error { color: var(--err); }
 	.tool {
@@ -303,7 +310,7 @@
 	textarea::placeholder { color: var(--faint); }
 	.crow { display: flex; align-items: center; gap: .35rem; padding: .25rem .45rem .45rem; }
 	.attach { font-size: 18px; line-height: 1; width: 32px; height: 30px; padding: 0; color: var(--dim); border-color: transparent; border-radius: 8px; }
-	.attach:hover { color: var(--gold); background: var(--panel-2); border-color: transparent; }
+	@media (hover: hover) { .attach:hover { color: var(--gold); background: var(--panel-2); border-color: transparent; } }
 	#send { border-radius: 9px; padding: .3rem .8rem; }
 	/* Attachments sit on top of the field, as chips you can drop one by one. */
 	.tray { display: flex; flex-wrap: wrap; gap: .35rem; padding: .55rem .6rem 0; }
@@ -314,7 +321,7 @@
 	}
 	.chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.chip .rm { color: var(--faint); cursor: pointer; border: 0; background: none; font: inherit; padding: 0 .1rem; }
-	.chip .rm:hover { color: var(--err); }
+	@media (hover: hover) { .chip .rm:hover { color: var(--err); } }
 	.pills { display: flex; align-items: center; gap: .2rem; padding: .35rem .25rem 0; min-width: 0; }
 	.pill {
 		display: inline-flex; align-items: center; gap: .35rem; min-width: 0; max-width: 46%;
@@ -322,7 +329,7 @@
 	}
 	.pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.pill .i { width: 14px; height: 14px; }
-	.pill:hover { color: var(--bone); background: var(--panel-2); }
+	@media (hover: hover) { .pill:hover { color: var(--bone); background: var(--panel-2); } }
 	.pill:disabled { opacity: .6; }
 	.pills .sep { color: var(--faint); }
 	.pending {
@@ -330,7 +337,7 @@
 		border-top: 1px solid var(--gold-dim); background: var(--panel-2); color: var(--gold); font: inherit; font-size: 12px;
 		padding: .5rem .9rem; cursor: pointer; border-radius: 0;
 	}
-	.pending:hover { background: var(--panel); color: var(--gold); }
+	@media (hover: hover) { .pending:hover { background: var(--panel); color: var(--gold); } }
 
 	/* the command menu: what `:` and `/` can do, over the composer */
 	.cmdmenu {
@@ -343,7 +350,7 @@
 		display: flex; align-items: baseline; gap: .6rem; width: 100%; text-align: left;
 		border: 1px solid transparent; border-radius: 8px; padding: .38rem .55rem; font-size: 13px; color: var(--bone);
 	}
-	.cmd:hover { border-color: transparent; background: var(--panel-2); color: var(--bone); }
+	@media (hover: hover) { .cmd:hover { border-color: transparent; background: var(--panel-2); color: var(--bone); } }
 	.cmd.sel { background: var(--panel-2); border-color: var(--line-2); }
 	.cmd .n { flex: none; color: var(--gold); }
 	.cmd .a { flex: none; color: var(--faint); }
@@ -375,7 +382,7 @@
 		display: flex; flex-direction: column; gap: .15rem; min-width: 0; text-align: left;
 		border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: .55rem .65rem;
 	}
-	.card:hover { border-color: var(--gold-dim); color: var(--bone); }
+	@media (hover: hover) { .card:hover { border-color: var(--gold-dim); color: var(--bone); } }
 	.card .nm { color: var(--bone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 	.card .sub { color: var(--faint); font-size: 11px; }
 	.below .label { display: flex; padding: 0 .1rem; }
@@ -389,7 +396,7 @@
 		border-radius: 0; padding: .6rem .8rem; font-size: 13px; text-align: left; background: transparent; color: var(--bone);
 	}
 	.chooser .pick:last-child { border-bottom: 0; }
-	.chooser .pick:hover { background: var(--panel-2); color: var(--bone); }
+	@media (hover: hover) { .chooser .pick:hover { background: var(--panel-2); color: var(--bone); } }
 	.chooser .pick .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.chooser .pick .sub { color: var(--faint); font-size: 11px; }
 	.chooser .pick .ok { color: var(--gold); visibility: hidden; }
@@ -397,8 +404,10 @@
 	.chooser .note { border-bottom: 1px solid var(--line); }
 
 	/* ---- sheets ---- */
+	/* the same visible box as the page (--vt, --vh): inset 0 is the layout viewport,
+	   which the keyboard covers, so a sheet's field sat under it */
 	.scrim {
-		position: fixed; inset: 0; background: rgba(4,4,2,.6); display: flex;
+		position: fixed; left: 0; right: 0; top: var(--vt, 0); height: var(--vh, 100dvh); background: rgba(4,4,2,.6); display: flex;
 		align-items: center; justify-content: center; padding: 1rem; z-index: 40;
 	}
 	.modal {
@@ -450,7 +459,7 @@
 		border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
 		font: inherit; font-size: 11px; padding: .2rem .45rem; border-radius: 5px; cursor: pointer;
 	}
-	.crumb:hover { color: var(--gold); border-color: var(--gold-dim); }
+	@media (hover: hover) { .crumb:hover { color: var(--gold); border-color: var(--gold-dim); } }
 	.places { border-bottom: 1px solid var(--line); margin-bottom: .35rem; padding-bottom: .5rem; }
 	.crumb.place { color: var(--gold); border-color: var(--gold-dim); }
 	.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; box-shadow: inset 0 0 0 1px rgba(128,128,128,.25); }
@@ -496,7 +505,7 @@
 		.cmd .c { display: none; }
 		/* Under 16px, iOS zooms the page on focus and never zooms back. */
 		textarea, .modal input, .searchbox input { font-size: 16px; }
-		.modal { width: 100%; max-height: 88dvh; }
+		.modal { width: 100%; max-height: min(88dvh, 100%); }
 		.scrim { padding: .5rem; align-items: flex-end; }
 		body.kb .pills { display: none; }
 		/* the keyboard is up on the landing: the composer sits on it, the greeting above */
@@ -3541,7 +3550,9 @@ function sessionRow(s, onPick, after) {
 	w.className = 'when';
 	w.textContent = when(s.mtime);
 	b.append(nm, w);
-	b.addEventListener('click', () => { closeNav(); if (onPick) onPick(); resumeSession(s.id); });
+	/* the chat already open: just show it. Resuming it again re-read it, and on a
+	   remote session the desktop printed a fresh "resumed" line for every tap. */
+	b.addEventListener('click', () => { closeNav(); if (onPick) onPick(); if (s.id !== state.session || landing) resumeSession(s.id); });
 	const more = document.createElement('button');
 	more.className = 'act more';
 	more.type = 'button';

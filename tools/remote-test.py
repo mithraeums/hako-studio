@@ -198,6 +198,10 @@ with sync_playwright() as p:
         ck(False, "page: a turn on the computer, through the relay (%s)" % str(e)[:60])
         if os.environ.get("DEBUG"): print("LOG:", pg.inner_text('#log')[-1500:]); print("META:", pg.inner_text('#meta')); pump(3); print("LOG2:", pg.inner_text('#log')[-800:]); print("HTML:", pg.inner_html('#log')[-1500:])
     ck(until(rb"hey from the relay") is not None, "desktop: the prompt shows in the terminal session")
+    # 11-04 on the iPhone: remote turns finished on the computer and the page still said thinking
+    pg.wait_for_timeout(1500)
+    ck(not pg.locator('.thinking').count() and pg.inner_text('#send').strip() == 'send',
+       "page: the turn ends here too, no thinking left after it (%d, %r)" % (pg.locator('.thinking').count(), pg.inner_text('#send').strip()))
     ck("?t=" not in pg.inner_text('#log') and "#link=" not in pg.inner_text('#log'),
        "page: the desktop's token and link lines never reach a device")
     pg.wait_for_timeout(800)
@@ -208,6 +212,7 @@ with sync_playwright() as p:
         log = open([os.path.join(dp, f) for dp, _, fs in os.walk(HOME + "/.hako/projects") for f in fs if f.endswith(".jsonl")][0]).read()
         ck("approval answered on a remote device" in log and "worked for" in pg.inner_text('#log').split('TOOL please')[-1],
            "page: the tool asks here, is approved here, and the turn finishes")
+        ck(not pg.locator('.thinking').count(), "page: and no thinking after that turn either")
     except Exception as e:
         ck(False, "page: the tool asks here, is approved here, and the turn finishes (%s)" % str(e)[:60])
     pg.fill('#input', 'ASK me'); pg.click('#send')
@@ -235,6 +240,8 @@ with sync_playwright() as p:
     pg.fill('#input', ':auto'); pg.click('#send')
     pg.wait_for_timeout(2000)
     ck("not from a remote device" in pg.inner_text('#log'), "page: :auto is refused from a remote device")
+    ck(not pg.locator('.thinking').count() and pg.inner_text('#send').strip() == 'send',
+       "page: and the refusal is the whole answer, no thinking after it (%d)" % pg.locator('.thinking').count())
     remote_url = pg.url
     # the same session from Safari's engine: Chromium (signed in) binds a WebKit
     # device to the account, which leaves it signed in without K (as an email or
