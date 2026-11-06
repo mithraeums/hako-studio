@@ -61,6 +61,8 @@ async function boot(wasmUrl) {
 /* Where work goes when the platform offers no directory API. On this device
    only; the picker lists it and can save files out to Files. */
 const WORKSPACE = '/workspace';
+/* images on their way into a prompt; the agent copies them into the session */
+const INBOX = '/hako/.hako/inbox';
 
 let workDir = WORKSPACE;
 
@@ -282,8 +284,20 @@ self.onmessage = async (ev) => {
 			self.postMessage({ type: 'open', id: msg.id, path: workDir });
 			return;
 		}
+		if (msg.type === 'image') {
+			/* A picked or pasted image waits here, and the prompt names its path: the
+			   agent attaches an image path in a prompt the way it does for hake, so
+			   the [image #N] it keeps comes from the same C as everywhere else. */
+			const ext = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' }[msg.mime] || 'jpg';
+			const path = INBOX + '/' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + ext;
+			storage.mkdirp(INBOX);
+			storage.write(path, new Uint8Array(msg.bytes), false);
+			self.postMessage({ type: 'ok', id: msg.id, path });
+			return;
+		}
 		if (msg.type === 'file-read') {
-			self.postMessage({ type: 'ok', id: msg.id, text: storage.read(msg.path) });
+			const text = storage.read(msg.path);
+			self.postMessage({ type: 'ok', id: msg.id, text: typeof text === 'string' ? text : null });
 			return;
 		}
 		if (msg.type === 'file-delete') {
@@ -394,6 +408,10 @@ self.onmessage = async (ev) => {
 				if (fd === 1) self.postMessage({ type: 'out', line });
 				else self.postMessage({ type: 'log', line });
 			});
+			/* the prompt that named an image kept its own copy; another run (a key
+			   still being pasted, a header refresh) leaves it waiting */
+			const said = msg.lines.join('\n');
+			for (const p of storage.list(INBOX)) if (said.includes(p)) storage.remove(p);
 			await storage.flush();          /* persist what the turn wrote */
 			self.postMessage({ type: 'done' });
 			return;
