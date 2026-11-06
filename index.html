@@ -1754,7 +1754,7 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 			            : pendingCode ? 'paste the code shown on that page' : '',
 			caps: ['prompt', 'slash', 'input', 'events', 'models', 'providers', 'sessions',
 			       'history', 'rename', 'delete', 'mark', 'dirs', 'files', 'open', 'mkdir',
-			       'upload', 'save', 'wasm']
+			       'upload', 'save', 'image', 'wasm']
 			      .concat(window.showDirectoryPicker ? ['pickfolder'] : []),
 		}),
 		'/api/sessions': async () => {
@@ -1793,10 +1793,17 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 		if (!url.startsWith('/api/')) return origFetch(input, init);
 		const path = url.split('?')[0];
 		const query = new URLSearchParams(url.split('?')[1] || '');
+		if (path === '/api/image') {
+			/* the bytes wait in the worker; the prompt names where, and the agent attaches it */
+			const blob = init.body;
+			const r = await ask('image', { bytes: await blob.arrayBuffer(), mime: blob.type });
+			return json(r && r.path ? { ok: true, marker: r.path } : { ok: false, error: 'could not keep the image' });
+		}
 		const body = init && init.body ? String(init.body) : '';
 
 		if (path === '/api/prompt') {
-			emit({ type: 'message', role: 'user', text: body });   /* the agent never replays it */
+			/* the agent never replays it; a waiting image reads as one, not as its path */
+			emit({ type: 'message', role: 'user', text: body.replace(/\/hako\/\.hako\/inbox\/\S+/g, '[image]') });
 			if (!config.has_key) { pendingPrompt = body; needKey(config.provider || 'gemini'); return json({ ok: true }); }
 			run([JSON.stringify({ type: 'prompt', text: body })]);
 			return json({ ok: true });

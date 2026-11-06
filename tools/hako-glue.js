@@ -10,6 +10,23 @@
 // randomness. Files do NOT go through WASI — they go through hkjs_fs_*, which is
 // what lets the same C run against OPFS in a tab and a real filesystem natively.
 
+/* What a store holds per file: a string for text, which every caller reads as
+   one, or the bytes themselves for a file that is not UTF-8 and holds a NUL (an
+   image). Decoding an image as text turned its bytes into U+FFFD, so a picture
+   handed to the agent never got past its PNG/JPEG magic check. */
+const utf8 = new TextDecoder('utf-8', { fatal: true }), lossy = new TextDecoder(), utf8enc = new TextEncoder();
+export function asStored(u8) {
+	try { return utf8.decode(u8); } catch (e) { /* not text */ }
+	return u8.indexOf(0) >= 0 ? u8 : lossy.decode(u8);   /* callers hand over a copy */
+}
+export function catStored(a, b) {
+	if (typeof a === 'string' && typeof b === 'string') return a + b;
+	const x = typeof a === 'string' ? utf8enc.encode(a) : a, y = typeof b === 'string' ? utf8enc.encode(b) : b;
+	const o = new Uint8Array(x.length + y.length);
+	o.set(x); o.set(y, x.length);
+	return o;
+}
+
 export function hakoImports({ memory, storage, log }) {
 	const dec = new TextDecoder();
 	const enc = new TextEncoder();
@@ -27,13 +44,13 @@ export function hakoImports({ memory, storage, log }) {
 	// C owns the memory it is handed back, so allocate through the module.
 	let malloc = null;
 	const setMalloc = (fn) => { malloc = fn; };
-	const writeStr = (s) => {
-		const buf = enc.encode(s);
+	const writeBytes = (buf) => {
 		const ptr = malloc(buf.length + 1);
 		bytes().set(buf, ptr);
 		bytes()[ptr + buf.length] = 0;
 		return ptr;
 	};
+	const writeStr = (s) => writeBytes(enc.encode(s));
 
 	// ---- WASI: only what a browser can honestly provide ---------------------
 	const ERRNO_OK = 0, ERRNO_BADF = 8, ERRNO_NOSYS = 52;
@@ -187,18 +204,21 @@ export function hakoImports({ memory, storage, log }) {
 			return text === null ? 0 : writeStr(text);
 		},
 		hkjs_fs_read(pathPtr, outPtrPtr, outLenPtr) {
-			const text = storage.read(norm(readStr(pathPtr)));
-			if (text === null || text === undefined) return -1;
-			/* writeStr allocates, and an allocation can grow memory — which detaches
+			const got = storage.read(norm(readStr(pathPtr)));
+			if (got === null || got === undefined) return -1;
+			const buf = typeof got === 'string' ? enc.encode(got) : got;
+			/* writeBytes allocates, and an allocation can grow memory — which detaches
 			   every view made before it. Take the view after. */
-			const ptr = writeStr(text);
+			const ptr = writeBytes(buf);
 			const dv = view();
 			dv.setUint32(outPtrPtr, ptr, true);
-			dv.setUint32(outLenPtr, enc.encode(text).length, true);
+			dv.setUint32(outLenPtr, buf.length, true);
 			return 0;
 		},
+		/* an append is a log line: text, as it always was */
 		hkjs_fs_write: (pathPtr, dataPtr, len, append) =>
-			storage.write(norm(readStr(pathPtr)), readStr(dataPtr, len), !!append) ? 0 : -1,
+			storage.write(norm(readStr(pathPtr)),
+			              append ? readStr(dataPtr, len) : asStored(bytes().slice(dataPtr, dataPtr + len)), !!append) ? 0 : -1,
 		hkjs_fs_stat(pathPtr, sizePtr, mtimePtr, isDirPtr) {
 			const st = storage.stat(norm(readStr(pathPtr)));
 			if (!st) return 0;
@@ -297,7 +317,7 @@ export async function dirStorage(handle) {
 		read: (p) => (files.has(key(p)) ? files.get(key(p)) : null),
 		write(p, data, append) {
 			const k = key(p);
-			files.set(k, append && files.has(k) ? files.get(k) + data : data);
+			files.set(k, append && files.has(k) ? catStored(files.get(k), data) : data);
 			times.set(k, Math.floor(Date.now() / 1000));
 			dirty.add(k);
 			gone.delete(k);
@@ -441,7 +461,7 @@ export async function opfsStorage() {
 				try {
 					const f = await handle.getFile();
 					if (f.size > MAX_MIRROR) continue;
-					files.set(p, await f.text());
+					files.set(p, asStored(new Uint8Array(await f.arrayBuffer())));
 					times.set(p, Math.floor(f.lastModified / 1000));
 				} catch { /* locked or unreadable: treat as absent */ }
 			}
@@ -475,7 +495,7 @@ export async function opfsStorage() {
 		read: (p) => (files.has(key(p)) ? files.get(key(p)) : null),
 		write(p, data, append) {
 			const k = key(p);
-			files.set(k, append && files.has(k) ? files.get(k) + data : data);
+			files.set(k, append && files.has(k) ? catStored(files.get(k), data) : data);
 			times.set(k, Math.floor(Date.now() / 1000));
 			dirty.add(k);
 			gone.delete(k);

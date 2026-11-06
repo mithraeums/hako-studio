@@ -155,7 +155,7 @@ check:
 		node tools/smoke.js index.html || fail=1; \
 		node tools/glue-test.js || fail=1; \
 		node tools/history-test.js >/dev/null 2>&1 || echo "(history test skipped — no stored sessions)"; \
-		if [ -f hako.wasm ] || [ -f $(DIST)/hako.wasm ]; then node tools/session-test.js || fail=1; \
+		if [ -f hako.wasm ] || [ -f $(DIST)/hako.wasm ]; then node tools/session-test.js || fail=1; node tools/image-test.js || fail=1; \
 		else echo "(session test skipped — no wasm built)"; fi; \
 	else echo "(smoke skipped — no node)"; fi; \
 	if [ -f "$(AGENT_DIR)/hako_web.h" ]; then \
