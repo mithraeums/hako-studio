@@ -223,6 +223,8 @@
 		display: flex; align-items: center; gap: .45rem; padding: .45rem .7rem; min-height: 50px;
 		padding-top: max(.45rem, env(safe-area-inset-top)); flex: none; background: var(--bg);
 	}
+	/* a home-screen app: iOS 26 blurs a band below the status bar, past the safe area */
+	body.app header, body.app aside { padding-top: calc(env(safe-area-inset-top) + 26px); }
 	header .burger, header .hmark { display: none; }
 	header .hmark { flex: none; }   /* never shrinks: a long title once ran under it on a phone */
 	body.side-off header .burger, body.side-off header .hmark { display: inline-flex; }
@@ -429,6 +431,9 @@
 	.modal .body { overflow-y: auto; overscroll-behavior: contain; padding: .45rem; }
 	.modal .foot { padding: .5rem; border-top: 1px solid var(--line); display: flex; gap: .4rem; align-items: center; }
 	.modal .foot .grow { flex: 1; }
+	.dev { display: flex; align-items: center; gap: .5rem; padding: .3rem .55rem; font-size: 13px; }
+	.dev .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.dev .sub { flex: none; color: var(--faint); font-size: 11px; }
 	.modal input {
 		width: 100%; font: inherit; color: var(--bone); background: var(--bg);
 		border: 1px solid var(--line-2); border-radius: 6px; padding: .4rem .5rem;
@@ -755,7 +760,7 @@ const relay = {
 
 /* ---- signing in: a passkey (its prf unlocks K) or an emailed code ---- */
 const PRF_SALT = new TextEncoder().encode('hako account key v1');
-const ACCOUNT_FULL = 'this account has all the devices it can hold. sign out on one you no longer use, then try again';
+const ACCOUNT_FULL = 'this account has all the devices it can hold. where you are still signed in, open account, your devices, and remove some';
 
 async function waChallenge() {
 	const r = await relay.req('POST', '/v1/webauthn/challenge');
@@ -1359,6 +1364,67 @@ window.hakoAccount = {
 		if (this.show) await this.show(false);
 		this.renderAcct();
 	},
+	/* Everything bound to the account, to clear out what is gone: a device with no way
+	   to sign itself out (a deleted home-screen app, cleared site data) stays bound. A
+	   remove asks twice. "remove offline" leaves unnamed ones alone, since one of those
+	   can be a computer's own link, which would then have to be linked again. */
+	async devices() {
+		const m = modal('your devices');
+		const K = await kvGet('k');
+		const named = (sealed) => {
+			if (!K || !sealed || sealed === '-') return '';
+			const blob = unb64u(sealed), n = hk.run('hkw_name_open', cat(K, blob), 32 + blob.length);
+			return n > 0 ? new TextDecoder().decode(hk.out(n)) : '';
+		};
+		const twice = (b, label, fn) => {
+			b.textContent = label;
+			b.addEventListener('click', async () => {
+				if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'sure?'; return; }
+				b.disabled = true;
+				await fn();
+				draw();
+			});
+		};
+		const revoke = (id) => relay.req('POST', '/v1/revoke', id);
+		const draw = async () => {
+			m.body.textContent = ''; m.foot.textContent = '';
+			const r = await relay.req('GET', '/v1/devices');
+			const rows = r.status === 200 ? r.text.split('\n').filter(Boolean).map((l) => {
+				const [id, , on, sealed] = l.split(' '), nm = named(sealed);
+				const code = nm.startsWith('code:'), parts = code ? nm.slice(5).split('\t') : [];
+				return { id, on: on === '1', named: !!nm, me: id === relay.id,
+				         label: code ? ((parts[1] || '').split('/').filter(Boolean).pop() || parts[0]) + ' on ' + parts[0]
+				              : nm.startsWith('browser:') ? nm.slice(8) : nm || 'unnamed' };
+			}) : [];
+			rows.sort((a, b) => b.me - a.me || b.on - a.on || a.label.localeCompare(b.label));
+			const say = document.createElement('div');
+			say.className = 'note';
+			say.textContent = r.status === 200 ? rows.length + ' on this account. removing one signs it out; a computer links again at its next :remote on.' : 'can\u2019t reach your account right now';
+			m.body.appendChild(say);
+			for (const d of rows) {
+				const row = document.createElement('div');
+				row.className = 'dev';
+				row.append(Object.assign(document.createElement('span'), { className: 'nm', textContent: d.label }),
+				           Object.assign(document.createElement('span'), { className: 'sub', textContent: d.me ? 'this browser' : d.on ? 'online' : '' }));
+				if (!d.me) {
+					const b = document.createElement('button');
+					twice(b, 'remove', () => revoke(d.id));
+					row.appendChild(b);
+				}
+				m.body.appendChild(row);
+			}
+			const gone = rows.filter((d) => !d.me && !d.on && d.named);
+			if (gone.length) {
+				const b = document.createElement('button');
+				b.className = 'bulk';
+				twice(b, 'remove ' + gone.length + ' offline', async () => { for (const d of gone) await revoke(d.id); });
+				m.foot.appendChild(b);
+			}
+			const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
+			const c = document.createElement('button'); c.textContent = 'close'; c.addEventListener('click', m.close); m.foot.appendChild(c);
+		};
+		try { await relay.signIn(); await draw(); } catch (e) { m.body.textContent = e.message || String(e); }
+	},
 	async addDevice() {
 		const m = modal('add a device');
 		const say = (t) => { const n = document.createElement('div'); n.className = 'note'; n.textContent = t; m.body.appendChild(n); return n; };
@@ -1438,6 +1504,7 @@ window.hakoAccount = {
 				location.hash = '#remote=' + c.id; location.reload();
 			}, c.id === REMOTE_ID));
 			m.body.appendChild(optionRow('+ add a device', '', '', () => { m.close(); this.addDevice(); }));
+			m.body.appendChild(optionRow('your devices', '', '', () => { m.close(); this.devices(); }));
 			btn('switch account', async () => { await this.signOut(); m.close(); this.open(null, null, true); });
 			btn('sign out', async () => { await this.signOut(); m.close(); });
 			const g = document.createElement('span'); g.className = 'grow'; m.foot.appendChild(g);
@@ -4373,8 +4440,8 @@ document.addEventListener('keydown', (e) => {
    visible box. iOS also pans that box down by about the keyboard's height to
    show the field, so the page sits at the box's offset, not at the top: sized
    alone, the composer landed at the top with blank space under it. A home-screen
-   app on iOS reports 100dvh and innerHeight a status bar short while drawing
-   under it, so there the screen is the height.
+   app is sized by innerHeight too: iOS 26 paints nothing below it, so sizing to
+   the screen put the sheets' buttons and the composer out of sight.
    With the keyboard up iOS also lets the DOCUMENT scroll (a swipe on the chat
    that ran past its end, or on the header), and the fixed page did not follow:
    the bar went to the top with a keyboard's height of blank under it. So the
@@ -4382,9 +4449,7 @@ document.addEventListener('keydown', (e) => {
    scrolling parts does nothing, and every change re-pans. */
 if (window.visualViewport) {
 	const vv = window.visualViewport;
-	const full = () => navigator.standalone
-		? (window.matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height))
-		: window.innerHeight;
+	document.body.classList.toggle('app', navigator.standalone === true);
 	const isOpen = () => vv.height < window.innerHeight - 80;
 	const pan = () => {
 		if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
@@ -4392,7 +4457,7 @@ if (window.visualViewport) {
 	};
 	const sync = () => {
 		const open = isOpen();
-		document.documentElement.style.setProperty('--vh', (open ? vv.height : full()) + 'px');
+		document.documentElement.style.setProperty('--vh', (open ? vv.height : window.innerHeight) + 'px');
 		pan();
 		document.body.classList.toggle('kb', open);
 		if (open && !landing) log.scrollTop = log.scrollHeight;

@@ -43,6 +43,14 @@ st = json.load(urllib.request.urlopen(U + "/api/state"))
 ck(all(k in st for k in ("version", "dir", "provider")), f"/api/state has version/dir/provider ({st.get('version')}, {st.get('provider')})")
 with sync_playwright() as p:
     b = p.chromium.launch()
+    # a home-screen app on iOS 26: the screen is taller than what it paints
+    pg = b.new_page(viewport={'width': 390, 'height': 801}, has_touch=True)
+    pg.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true }); Object.defineProperty(screen, 'height', { get: () => 844 });")
+    pg.goto(U); pg.wait_for_timeout(1000)
+    ck(pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--vh')") == '801px'
+       and pg.evaluate("document.body.classList.contains('app')"), "home-screen app: the page is as tall as what iOS paints, not the screen")
+    ck(pg.evaluate("parseFloat(getComputedStyle(document.querySelector('header')).paddingTop)") >= 26, "home-screen app: the header clears the blur under the status bar")
+    pg.close()
     for name, vp in (("desk", {'width': 1280, 'height': 800}), ("phone", {'width': 390, 'height': 844})):
         pg = b.new_page(viewport=vp, has_touch=(name == "phone"))
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))

@@ -1431,7 +1431,8 @@ static void route_bind(int fd, Body *b, const char *acct) {
 	pthread_mutex_lock(&slock);
 	int r = bind_add(acct, line);
 	pthread_mutex_unlock(&slock);
-	if (r) { reply(fd, bind_err(r), "no\n"); return; }
+	/* hako takes "no" to mean this key is someone else's and makes a new one */
+	if (r) { reply(fd, bind_err(r), r == BIND_OTHER ? "no\n" : "full\n"); return; }
 	char id[33];
 	device_id(id, pub);
 	Dev *x = dev_by_id(id);
