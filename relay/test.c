@@ -581,7 +581,7 @@ int main(int argc, char **argv) {
 		ck(n > 0 && n < 64, "account full: binding stops at the cap");
 		Dev x;
 		dev_new(&x);
-		ck(http("POST", "/v1/bind", A.token, x.pubh, NULL, 0) == 507, "account full: bind says so, not 409");
+		ck(http("POST", "/v1/bind", A.token, x.pubh, out, sizeof out) == 507 && strstr(out, "full") && !strstr(out, "no"), "account full: bind says so, in words hako will not read as another account");
 		Dev F;
 		dev_new(&F);
 		ck(dev_sign_in(&F) == 0 && pk_login(&F, &P, 0, out, sizeof out) == 507, "account full: a new browser's passkey sign-in says so, not 409");

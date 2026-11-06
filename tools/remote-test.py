@@ -169,7 +169,7 @@ with sync_playwright() as p:
     pg.click('.modal button:has-text("sign in with a passkey")')
     host = os.uname().nodename.split('.')[0]
     row = pg.wait_for_selector('.modal .opt:has-text("proj")', timeout=15000)
-    ck(host in row.inner_text() and pg.locator('.modal .opt:not(:has-text("add a device"))').count() == 1
+    ck(host in row.inner_text() and pg.locator('.modal .opt:not(:has-text("add a device")):not(:has-text("your devices"))').count() == 1
        and "signed in with a passkey" in pg.locator('.modal').inner_text() and "signed in with a passkey" in pg.inner_text('#acct'),
        "page: a fresh device signs in, the passkey unwraps the key, the code session shows by folder and host (and only it)")
     row.click()
@@ -189,6 +189,22 @@ with sync_playwright() as p:
         return [!!f && f.nextElementSibling === document.getElementById('here'), bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'];
     })()""")
     ck(nest == [True, True], "page: the open folder holds its chats, and only the chat is highlighted %s" % nest)
+    # a device with no way to sign itself out can be cleared from another one
+    dead = pg.evaluate("""(async () => { const out = [];
+        for (let i = 0; i < 2; i++) { const pub = hex(hk.random(32)); out.push((await relay.req('POST', '/v1/bind', pub)).status); }
+        return out; })()""")
+    pg.evaluate("void window.hakoAccount.devices()")
+    pg.wait_for_selector('.modal .dev', timeout=10000)
+    sheet = pg.locator('.modal').inner_text()
+    before = pg.locator('.modal .dev').count()
+    ck(dead == [200, 200] and "this browser" in sheet and "proj on" in sheet and "unnamed" in sheet,
+       "devices: lists this browser, the folder by name, and what has no name")
+    ck(pg.locator('.modal .dev:has-text("this browser") button').count() == 0, "devices: this browser has no remove (sign out does that)")
+    gone = pg.locator('.modal .dev:has-text("unnamed") button').last
+    gone.click(); ck(pg.locator('.modal .dev:has-text("unnamed") button:has-text("sure?")').count() == 1, "devices: a remove asks twice")
+    pg.locator('.modal .dev:has-text("unnamed") button:has-text("sure?")').click(); pg.wait_for_timeout(800)
+    ck(pg.locator('.modal .dev').count() == before - 1, "devices: the second tap removes it")
+    pg.locator('.modal button:has-text("close")').last.click(); pg.wait_for_timeout(200)
     for mo in pg.locator('.modal').all(): print("modal open:", mo.inner_text().replace("\n", " | "))
     if os.environ.get("DEBUG"):
         print(open(W + "/relay.out").read()[-3000:]); print("\n".join(l for l in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen).decode(errors="replace").splitlines() if "remote" in l or "relay" in l)); print(errs)

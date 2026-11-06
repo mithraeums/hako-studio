@@ -10,7 +10,11 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - the menu: an open folder holds its chats, indented under it, and only the open chat is highlighted, as one even bubble with its ⋯ inside
 - the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
 
+### added
+- account, your devices: everything bound to the account, with remove, and remove offline for the lot; a deleted home-screen app or cleared site data has no way to sign itself out
+
 ### fixed
+- a home-screen app on iOS 26: sheets' buttons and the composer were out of sight, the page was sized to the screen while iOS paints less; the header clears the blur under the status bar
 - a full account no longer says "this browser is signed in to another account": the relay answers 507 and the page says the account is full
 
 ### added
