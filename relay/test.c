@@ -568,6 +568,26 @@ int main(int argc, char **argv) {
 	ck(dev_sign_in(&A) == 0 && !strcmp(A.acct, acct1), "after a restart: the account");
 	ck(dev_sign_in(&E) == 0 && !strcmp(E.acct, acct1), "after a restart: the bound computer");
 	ck(dev_sign_in(&B) == 0 && pk_login(&B, &P, 0, out, sizeof out) == 200, "after a restart: passkey login");
+
+	/* a full account is not "another account": the browser has to say which */
+	{
+		int n = 0;
+		ck(dev_sign_in(&A) == 0, "account full: a device on it signs in");
+		for (; n < 64; n++) {
+			Dev x;
+			dev_new(&x);
+			if (http("POST", "/v1/bind", A.token, x.pubh, NULL, 0) != 200) break;
+		}
+		ck(n > 0 && n < 64, "account full: binding stops at the cap");
+		Dev x;
+		dev_new(&x);
+		ck(http("POST", "/v1/bind", A.token, x.pubh, NULL, 0) == 507, "account full: bind says so, not 409");
+		Dev F;
+		dev_new(&F);
+		ck(dev_sign_in(&F) == 0 && pk_login(&F, &P, 0, out, sizeof out) == 507, "account full: a new browser's passkey sign-in says so, not 409");
+		ck(dev_sign_in(&A) == 0 && pk_login(&A, &P, 0, out, sizeof out) == 200, "account full: a device already on it still signs in");
+	}
+
 	relay_stop();
 	kill(gh_pid, SIGTERM);
 	waitpid(gh_pid, NULL, 0);

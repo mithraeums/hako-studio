@@ -152,6 +152,13 @@
 	.sess.k-chat::before { content: '\25CB'; color: var(--faint); }
 	.sessrow { display: flex; align-items: stretch; gap: 1px; border-radius: 8px; }
 	.sessrow .sess { flex: 1; min-width: 0; }
+	/* one open chat is one bubble with its \22ef inside, as wide as any other row */
+	.sessrow:has(.sess.cur) { background: var(--panel-2); }
+	.sessrow .sess.cur { background: transparent; }
+	/* an open folder holds its chats: it says where you are, the chat is the one highlight */
+	#project-list > .sess.cur { background: transparent; color: var(--bone); font-weight: 600; }
+	#project-list .here { margin-left: calc(.55rem + .5em); padding-left: .25rem; border-left: 1px solid var(--line-2); }
+	#project-list .here .sess::before { content: none; }
 	.sessrow .act {
 		flex: none; border: 1px solid transparent; background: transparent;
 		color: var(--faint); padding: 0 .38rem; font-size: 13px; line-height: 1; border-radius: 6px;
@@ -748,6 +755,7 @@ const relay = {
 
 /* ---- signing in: a passkey (its prf unlocks K) or an emailed code ---- */
 const PRF_SALT = new TextEncoder().encode('hako account key v1');
+const ACCOUNT_FULL = 'this account has all the devices it can hold. sign out on one you no longer use, then try again';
 
 async function waChallenge() {
 	const r = await relay.req('POST', '/v1/webauthn/challenge');
@@ -773,6 +781,7 @@ async function passkeyLogin() {
 	const r = cred.response, credId = b64u(cred.rawId);
 	const res = await relay.req('POST', '/v1/passkey/login',
 		[credId, b64u(r.clientDataJSON), b64u(r.authenticatorData), b64u(r.signature)].join(' '));
+	if (res.status === 507) throw new Error(ACCOUNT_FULL);
 	if (res.status !== 200) throw new Error(res.status === 409 ? 'this browser is signed in to another account' : 'that passkey was not accepted');
 	const [acct, wrapped] = res.text.split(' ');
 	const prf = prfOf(cred);
@@ -879,6 +888,7 @@ async function ssoVerify(back) {
 	if (back.error) throw new Error(back.error === 'access_denied' ? name + ' sign-in was cancelled' : name + ' said: ' + back.error);
 	const r = await relay.req('POST', '/v1/' + back.p + '/verify', back.code + ' ' + back.state + ' ' + (back.invite || '-'));
 	if (r.status === 402) throw Object.assign(new Error('a new account needs an invite code. type it below'), { invite: true });
+	if (r.status === 507) throw new Error(ACCOUNT_FULL);
 	if (r.status === 409) throw new Error('this browser is signed in to another account');
 	if (r.status !== 200) throw new Error(r.status === 403 ? 'that ' + name + ' sign-in expired. try again' : name + ' sign-in failed (' + r.status + ')');
 	return accountIn(r.text);
@@ -1531,9 +1541,12 @@ window.hakoAccount = {
 			return b;
 		};
 		const projects = async () => {
-			const list = await codeSessions(), el = $('project-list');
+			const list = await codeSessions(), el = $('project-list'), here = $('here');
+			$('projects').after(here);                 /* out first: clearing the list would take it along */
 			el.textContent = '';
 			for (const c of list) el.appendChild(row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }));
+			const open = el.querySelector('.sess.cur');
+			if (open) open.after(here);                /* a folder's chats sit under that folder */
 			$('projects').hidden = !list.length;
 			window.hakoCodeLanding(list);
 			applySearch();
@@ -4152,8 +4165,42 @@ function applySearch() {
 const UNSAFE = /^[:/](models?|providers?|theme|login(\s+api)?)\s*$/i;
 const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
 
+/* Temporary, for the home-screen layout on iOS, which nothing but the phone can
+   show: type #probe and it lists every height the page could use, and draws them. */
+function viewportProbe() {
+	const box = document.createElement('div');
+	box.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(236,231,218,.92);color:#111;font:12px/1.35 monospace';
+	const unit = (u) => { const d = document.createElement('div'); d.style.cssText = 'position:absolute;width:1px;height:' + u; box.appendChild(d); const h = d.getBoundingClientRect().height; d.remove(); return h; };
+	document.body.appendChild(box);
+	const inset = document.createElement('div');
+	inset.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)';
+	box.appendChild(inset);
+	const v = window.visualViewport, cs = getComputedStyle(inset), root = getComputedStyle(document.documentElement);
+	const vals = [['vh', unit('100vh'), '#c00'], ['dvh', unit('100dvh'), '#06c'], ['lvh', unit('100lvh'), '#080'], ['svh', unit('100svh'), '#c60'],
+		['inner', window.innerHeight, '#808'], ['screen', screen.height, '#000'], ['fixed', box.getBoundingClientRect().height, '#0aa']];
+	vals.forEach(([, h, c], i) => { const s = document.createElement('div'); s.style.cssText = 'position:fixed;top:0;width:12px;right:' + (i * 15 + 2) + 'px;height:' + h + 'px;background:' + c; box.appendChild(s); });
+	const foot = document.createElement('div');
+	foot.style.cssText = 'position:fixed;left:8px;bottom:0;background:#060;color:#fff;padding:2px 8px';
+	foot.textContent = 'bottom:0, tap to close';
+	box.appendChild(foot);
+	const t = document.createElement('div');
+	t.style.cssText = 'position:absolute;left:8px;right:112px;top:calc(env(safe-area-inset-top) + 8px);white-space:pre-wrap';
+	t.textContent = ['standalone ' + navigator.standalone + ' / display-mode ' + matchMedia('(display-mode: standalone)').matches,
+		navigator.userAgent.replace(/^.*?OS /, 'OS ').slice(0, 40),
+		'screen ' + screen.width + 'x' + screen.height + ' avail ' + screen.availHeight,
+		'inner ' + innerWidth + 'x' + innerHeight + ' outer ' + outerHeight + ' client ' + document.documentElement.clientHeight,
+		'vv h ' + (v && v.height) + ' top ' + (v && v.offsetTop) + ' page ' + (v && v.pageTop),
+		'safe top ' + cs.paddingTop + ' bottom ' + cs.paddingBottom,
+		vals.map(([n, h]) => n + ' ' + h).join(', '),
+		'--vh ' + root.getPropertyValue('--vh') + ' --vt ' + root.getPropertyValue('--vt') + ' body ' + document.body.getBoundingClientRect().height,
+		'strips right to left: red vh, blue dvh, green lvh, orange svh, purple inner, black screen, teal fixed'].join('\n');
+	box.appendChild(t);
+	box.addEventListener('click', () => box.remove());
+}
+
 form.addEventListener('submit', (e) => {
 	e.preventDefault();
+	if (input.value.trim() === '#probe') { input.value = ''; viewportProbe(); return; }
 	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
 	if (!text && !attached.length) return;
