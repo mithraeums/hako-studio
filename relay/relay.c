@@ -405,9 +405,10 @@ static void bind_acct(const char *pubhex, char out[17]) {
 	pthread_mutex_unlock(&slock);
 }
 
-/* Binds pubhex to acct. Caller holds slock. 0, or -1 when the key belongs to
-   another account (revoke it there first), the account is at its device cap,
-   or the store is full. */
+/* Binds pubhex to acct. Caller holds slock. 0, BIND_OTHER when the key belongs
+   to another account (revoke it there first), BIND_FULL when the account is at
+   its device cap, or BIND_STORE when the store is full or will not save. */
+enum { BIND_OTHER = -1, BIND_FULL = -2, BIND_STORE = -3 };
 static int bind_add(const char *acct, const char *pubhex) {
 	Bind *spare = NULL, *hit = NULL;
 	int n = 0;
@@ -417,14 +418,20 @@ static int bind_add(const char *acct, const char *pubhex) {
 		else if (b->used && !strcmp(b->acct, acct)) n++;
 		else if (!b->used && !spare) spare = b;
 	}
-	if (hit) return strcmp(hit->acct, acct) ? -1 : 0;
-	if (n >= DEV_PER_ACCT || (!hit && !spare)) return -1;
+	if (hit) return strcmp(hit->acct, acct) ? BIND_OTHER : 0;
+	if (n >= DEV_PER_ACCT) return BIND_FULL;
+	if (!spare) return BIND_STORE;
 	hit = spare;
 	memset(hit, 0, sizeof *hit);
 	hit->used = 1;
 	snprintf(hit->pub, sizeof hit->pub, "%s", pubhex);
 	memcpy(hit->acct, acct, 17);
-	return store_save();
+	return store_save() ? BIND_STORE : 0;
+}
+
+/* The reply for a failed bind: only one of them means another account. */
+static const char *bind_err(int r) {
+	return r == BIND_OTHER ? "409 Conflict" : r == BIND_FULL ? "507 Insufficient Storage" : "503 Service Unavailable";
 }
 
 /* A new account id. Caller holds slock. */
@@ -1036,7 +1043,7 @@ static void route_pk_login(int fd, Body *b, Dev *d, const char *ip) {
 	pthread_mutex_lock(&slock);
 	int r = dev_bind_locked(d, acct);
 	pthread_mutex_unlock(&slock);
-	if (r) { reply(fd, "409 Conflict", "this device belongs to another account\n"); return; }
+	if (r) { reply(fd, bind_err(r), "no\n"); return; }
 	dev_bound(d, acct);
 	snprintf(out, sizeof out, "%s %s\n", acct, wrapped[0] ? wrapped : "-");
 	reply(fd, "200 OK", out);
@@ -1170,7 +1177,11 @@ static int login_take(int fd, Dev *d, const char *h, const char *invite) {
 		}
 		if (!err) { spare->used = 1; memcpy(spare->acct, acct, 17); memcpy(spare->hash, h, 65); }
 	}
-	if (!err && (dev_bind_locked(d, acct) || store_save())) err = "503 Service Unavailable";
+	if (!err) {
+		int r = dev_bind_locked(d, acct);
+		if (r) err = bind_err(r);
+		else if (store_save()) err = "503 Service Unavailable";
+	}
 	pthread_mutex_unlock(&slock);
 	pthread_mutex_lock(&dlock);
 	if (err && !strncmp(err, "402", 3) && strcmp(d->hold, h)) {        /* route_invite's retries keep their count */
@@ -1420,7 +1431,7 @@ static void route_bind(int fd, Body *b, const char *acct) {
 	pthread_mutex_lock(&slock);
 	int r = bind_add(acct, line);
 	pthread_mutex_unlock(&slock);
-	if (r) { reply(fd, "409 Conflict", "no\n"); return; }
+	if (r) { reply(fd, bind_err(r), "no\n"); return; }
 	char id[33];
 	device_id(id, pub);
 	Dev *x = dev_by_id(id);

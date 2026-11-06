@@ -6,6 +6,13 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
+### changed
+- the menu: an open folder holds its chats, indented under it, and only the open chat is highlighted, as one even bubble with its ⋯ inside
+- the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
+
+### fixed
+- a full account no longer says "this browser is signed in to another account": the relay answers 507 and the page says the account is full
+
 ### added
 - images in the browser's own agent: paste, drop or pick a picture and the model sees it with your message, as it already did under `hako --serve`. The page hands the bytes to the agent in hako.wasm, which attaches them the way it does everywhere else
 

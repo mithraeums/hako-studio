@@ -184,6 +184,11 @@ with sync_playwright() as p:
     pg.locator('.modal button:has-text("close")').last.click(); pg.wait_for_timeout(300)
     ck("proj" in pg.inner_text('#project-list'), "page: the menu lists the project (the shared folder)")
     ck(pg.locator('#here').is_visible(), "page: in a session, the folder's own chats show too")
+    nest = pg.evaluate("""(() => {
+        const f = document.querySelector('#project-list .sess.cur'), bg = f && getComputedStyle(f).backgroundColor;
+        return [!!f && f.nextElementSibling === document.getElementById('here'), bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'];
+    })()""")
+    ck(nest == [True, True], "page: the open folder holds its chats, and only the chat is highlighted %s" % nest)
     for mo in pg.locator('.modal').all(): print("modal open:", mo.inner_text().replace("\n", " | "))
     if os.environ.get("DEBUG"):
         print(open(W + "/relay.out").read()[-3000:]); print("\n".join(l for l in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen).decode(errors="replace").splitlines() if "remote" in l or "relay" in l)); print(errs)
@@ -553,7 +558,7 @@ with sync_playwright() as p:
     b.close()
 
 store = open(W + "/relay/store").read() if os.path.exists(W + "/relay/store") else ""
-ck(store.count("\nb ") + store.startswith("b ") >= 2 and "hey" not in store, "relay: stores keys and bindings, no content")
+ck(store.count("\nb ") + store.startswith("b ") >= 2 and "hey from" not in store, "relay: stores keys and bindings, no content")
 ck(store.count("\nl ") + store.startswith("l ") == 3 and not re.search("4242|5151|octo|kat |110169|ya29|GOCSPX", store), "relay: GitHub and Google are one keyed hash each, no id, name or token")
 print("\n".join(res))
 bad = [r for r in res if r.startswith("FAIL")]

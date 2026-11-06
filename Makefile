@@ -100,7 +100,7 @@ site: wasm
 	    $(if $(RELAY_URL),-e "s|<title>hako</title>|<meta name=\"hako-relay\" content=\"$(RELAY_URL)\"><title>hako</title>|") \
 	    index.html > $(DIST)/index.html; \
 	cp icon-180.png $(DIST)/$$icon; \
-	printf '%s\n' '{"id":"/","name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/'$$icon'","sizes":"180x180","type":"image/png","purpose":"any"}]}' > $(DIST)/manifest.webmanifest; \
+	printf '%s\n' '{"id":"/","name":"hako studio","short_name":"hako","start_url":"/","display":"standalone","background_color":"#ece7da","theme_color":"#ece7da","icons":[{"src":"/'$$icon'","sizes":"180x180","type":"image/png","purpose":"any"}]}' > $(DIST)/manifest.webmanifest; \
 	echo "build stamp $$stamp, icon $$icon"
 	@cp hako.wasm tools/hako-glue.js tools/hako-worker.js $(DIST)/
 	@cp icon-180.png $(DIST)/icon-180.png          # an old home-screen icon still asks here
