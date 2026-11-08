@@ -70,6 +70,9 @@
 	   100% leaves the composer under the URL bar. --vh and --vt are set from
 	   visualViewport for the keyboard case, which no CSS unit tracks. */
 	@supports (height: 100dvh) { html, body { height: 100dvh; } }
+	/* a home-screen app on iOS 26 stops a status bar short of the screen (47 pt of 926
+	   here); other apps report that a 100vh root clears it. No browser bar to overshoot. */
+	@media (display-mode: standalone) { html { height: 100vh; } }
 	body { position: fixed; left: 0; right: 0; top: var(--vt, 0); height: var(--vh, 100dvh); }
 	button, .sess, .opt, .navrow, .card, .pill { touch-action: manipulation; }   /* no double-tap zoom */
 	/* A touch screen reacts to the tap, not to where a finger last was: hover styling is
@@ -150,6 +153,11 @@
 	.sess.k-code::before, .sess.k-chat::before { flex: none; width: 1em; }
 	.sess.k-code::before { content: '\25A3'; color: var(--gold); }
 	.sess.k-chat::before { content: '\25CB'; color: var(--faint); }
+	/* a code session open in this window, not shown: asking you, working, or finished since */
+	.sess[data-att="ask"]::after, .sess[data-att="busy"]::after, .sess[data-att="fresh"]::after { flex: none; width: 1em; text-align: center; }
+	.sess[data-att="ask"]::after { content: '\25CF'; color: var(--gold); }
+	.sess[data-att="busy"]::after { content: '\22EF'; color: var(--faint); }
+	.sess[data-att="fresh"]::after { content: '\2022'; color: var(--dim); }
 	.sessrow { display: flex; align-items: stretch; gap: 1px; border-radius: 8px; }
 	.sessrow .sess { flex: 1; min-width: 0; }
 	/* one open chat is one bubble with its \22ef inside, as wide as any other row */
@@ -633,7 +641,9 @@ const SSO_BACK = (() => {
 	} catch (e) { return null; }
 })();
 const HASH = SSO_BACK ? SSO_BACK.hash : typeof location === 'object' ? location.hash : '';
-const REMOTE_ID = (HASH.match(/^#remote=([0-9a-f]{32})$/) || [])[1] || '';
+/* the code session this page shows, '' for this browser's own chat; changes without a reload */
+const REMOTE_RE = /^#remote=([0-9a-f]{32}(?:\/[0-9a-z]{1,12})?)$/;
+let REMOTE_ID = (HASH.match(REMOTE_RE) || [])[1] || '';
 const INVITE = (HASH.match(/^#invite=([a-z0-9-]{10,16})$/i) || [])[1] || '';
 
 /* a test turns this on (window.hakoDebug) to see the streams; off, it costs nothing */
@@ -708,6 +718,33 @@ const kvGet = (k) => kv('readonly', (st) => st.get(k));
 const kvSet = (k, v) => kv('readwrite', (st) => st.put(v, k));
 const kvClear = () => kv('readwrite', (st) => st.clear());
 
+/* One device key per browser. Each window opens its own stream on the relay, named
+   by a tag, so two windows never take each other's place. A duplicated tab copies
+   sessionStorage, so a lock says the tag is this window's, or it takes a new one. */
+const tagNew = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => '0123456789abcdefghijklmnopqrstuvwxyz'[b % 36]).join('');
+let tagWait = null;
+function windowTag() {
+	return tagWait || (tagWait = (async () => {
+		let t = '';
+		try { t = sessionStorage.getItem('hako-tag') || ''; } catch (e) {}
+		for (let i = 0; i < 4; i++) {
+			if (!/^[0-9a-z]{1,12}$/.test(t)) t = tagNew();
+			const mine = !navigator.locks || await new Promise((res) => {
+				navigator.locks.request('hako-tag-' + t, { ifAvailable: true }, (lock) => {
+					res(!!lock);
+					return lock ? new Promise(() => {}) : undefined;     /* held for as long as this page lives */
+				}).catch(() => res(true));
+			});
+			if (mine) { try { sessionStorage.setItem('hako-tag', t); } catch (e) {} return t; }
+			t = '';
+		}
+		return tagNew();
+	})());
+}
+/* "<from> <base64>" off a relay stream: from is a device id, or "<id>/<tag>" for one of its streams */
+const relayLine = (line) => { const m = /^([0-9a-f]{32}(?:\/[0-9a-z]{1,12})?) (.+)$/.exec(line); return m ? { from: m[1], body: m[2] } : null; };
+const pubOf = (s) => { hk.run('hkw_pub', s); return hk.out(48).slice(0, 32); };
+
 const relay = {
 	token: '', id: '', acct: '', s: null, at: 0,
 	async req(method, path, body) {
@@ -717,8 +754,7 @@ const relay = {
 	},
 	/* the device key proves itself: MAC keyed by X25519(s, the relay's one-off key).
 	   A token lives an hour on the relay; reuse it for ten minutes, since sign-ins are rate limited. */
-	/* One sign-in at a time: the relay keeps one token per device, so two at
-	   once leave this page holding the one the relay replaced (a 401). */
+	/* One sign-in at a time: two at once leave this page holding a token the relay replaced (a 401). */
 	signIn() {
 		if (this.token && Date.now() - this.at < 600000) return Promise.resolve();
 		return this.signing || (this.signing = this.signInOnce().finally(() => { this.signing = null; }));
@@ -731,29 +767,43 @@ const relay = {
 	forget() { this.token = ''; this.at = 0; this.keep(null); },   /* a 401: the relay replaced it */
 	async signInOnce() {
 		await hk.load();
+		this.tag = await windowTag();
 		this.s = await kvGet('device');
 		if (!this.s) { this.s = hk.random(32); await kvSet('device', this.s); }
-		hk.run('hkw_pub', this.s);
-		const o = hk.out(48);
-		this.pub = o.slice(0, 32);
+		this.pub = pubOf(this.s);
 		const k = this.kept();
 		/* the account may have come after the token; a device bound from another one
 		   knows it only from the relay, so that one signs in */
 		const known = k && k.pub === hex(this.pub) && Date.now() - k.at < 600000 ? await kvGet('acct') : null;
 		if (known) { Object.assign(this, { token: k.token, id: k.id, acct: known, at: k.at }); return; }
 		this.token = '';
-		const c = await this.req('POST', '/v1/auth/challenge', hex(this.pub));
+		const me = await this.prove(this.s, this.pub);
+		this.token = me.tok; this.id = me.id; this.acct = me.acct; this.at = Date.now();
+		this.keep({ pub: hex(this.pub), token: me.tok, id: me.id, at: this.at });
+	},
+	/* the device key proves itself; this mints that device a token */
+	async prove(s, pub) {
+		const c = await this.req('POST', '/v1/auth/challenge', hex(pub));
 		if (c.status !== 200) throw new Error('can\u2019t connect right now. try again in a moment');
 		const [cid, epub] = c.text.split(' ');
-		if (hk.run('hkw_proof', cat(this.s, unhex(epub), unhex(cid)))) throw new Error('sign-in didn\u2019t work, try again');
+		if (hk.run('hkw_proof', cat(s, unhex(epub), unhex(cid)))) throw new Error('sign-in didn\u2019t work, try again');
 		const p = await this.req('POST', '/v1/auth/prove', cid + ' ' + hex(hk.out(32)));
 		if (p.status !== 200) throw new Error('sign-in didn\u2019t work, try again');
 		const [tok, id, acct] = p.text.split(' ');
-		this.token = tok; this.id = id; this.acct = acct === '-' ? '' : acct; this.at = Date.now();
-		this.keep({ pub: hex(this.pub), token: tok, id, at: this.at });
+		return { tok, id, acct: acct === '-' ? '' : acct };
+	},
+	/* This window's stream: frames to "<id>/<tag>" come here, and frames to the device */
+	down(signal) {
+		return fetch(RELAY_URL + '/v1/down?s=' + this.tag, { headers: { Authorization: 'Bearer ' + this.token }, signal });
+	},
+	/* A peer addressed by its stream is new enough to read ours, so frames say which
+	   window they are from. An old hako reads a bare id only, and its answer to one
+	   reaches every window, where only the one holding that session can open it. */
+	up(to, body) {
+		return this.req('POST', '/v1/up' + (to.includes('/') ? '?s=' + this.tag : ''), body);
 	},
 	async send(to, frame) {
-		const r = await this.req('POST', '/v1/up', to + ' ' + b64(frame) + '\n');
+		const r = await this.up(to, to + ' ' + b64(frame) + '\n');
 		return r.status === 200;
 	},
 };
@@ -925,7 +975,7 @@ async function inviteFinish(invite) {
    (a 4 frame) with K and the account id sealed under the code's secret, as
    :remote pair does on a computer. Resolves with that device's id; one use. */
 async function pairHost(secret, K, signal) {
-	const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token }, signal });
+	const r = await relay.down(signal);
 	if (!r.ok) throw new Error('can\u2019t connect right now');
 	const rd = r.body.getReader(), dec = new TextDecoder();
 	let buf = '';
@@ -935,11 +985,11 @@ async function pairHost(secret, K, signal) {
 		buf += dec.decode(v.value, { stream: true });
 		let i;
 		while ((i = buf.indexOf('\n')) >= 0) {
-			const line = buf.slice(0, i), from = line.slice(0, 32);
+			const f = relayLine(buf.slice(0, i));
 			buf = buf.slice(i + 1);
-			if (!/^[0-9a-f]{32} /.test(line) || line.slice(33) !== b64(new Uint8Array([4]))) continue;
+			if (!f || f.body !== b64(new Uint8Array([4]))) continue;
 			hk.run('hkw_link', cat(secret, K, new TextEncoder().encode(relay.acct)));
-			if (await relay.send(from, cat(new Uint8Array([4]), hk.out(88)))) return from;
+			if (await relay.send(f.from, cat(new Uint8Array([4]), hk.out(88)))) return f.from.slice(0, 32);
 		}
 	}
 }
@@ -980,7 +1030,7 @@ async function pairDevice(idHex, secretHex) {
 	try {
 		await relay.signIn();
 		if (!relay.acct) throw new Error('sign in first');
-		const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token }, signal: ctl.signal });
+		const r = await relay.down(ctl.signal);
 		if (!r.ok) throw new Error('can\u2019t connect right now');
 		const rd = r.body.getReader(), dec = new TextDecoder();
 		const answer = (async () => {
@@ -992,10 +1042,10 @@ async function pairDevice(idHex, secretHex) {
 				buf += dec.decode(v.value, { stream: true });
 				let i;
 				while ((i = buf.indexOf('\n')) >= 0) {
-					const line = buf.slice(0, i); buf = buf.slice(i + 1);
+					const line = buf.slice(0, i), l = relayLine(line); buf = buf.slice(i + 1);
 					if (line === '! offline ' + idHex) return null;
-					if (!line.startsWith(idHex + ' ')) continue;
-					const f = unb64(line.slice(33));
+					if (!l || l.from.slice(0, 32) !== idHex) continue;
+					const f = unb64(l.body);
 					if (f[0] === 4 && f.length === 89) return f.subarray(1);
 				}
 			}
@@ -1015,8 +1065,10 @@ async function pairDevice(idHex, secretHex) {
 	}
 }
 
-/* The account's open code sessions: each seals "code:<host>\t<folder>" under
-   K, so only a device holding K can tell a session from a browser, or read it. */
+/* The account's open code sessions: each folder seals "code:<host>\t<folder>" under
+   K, so only a device holding K can tell a session from a browser, or read it. Each
+   :remote on is a stream of that folder's device, so a session is "<id>/<tag>", or
+   the bare id for an old hako's untagged stream. Only live ones exist here. */
 async function codeSessions() {
 	const K = await kvGet('k');
 	if (!relay.acct || !K) return [];
@@ -1024,24 +1076,116 @@ async function codeSessions() {
 	if (r.status !== 200) return [];
 	const out = [];
 	for (const l of r.text.split('\n').filter(Boolean)) {
-		const [id, , online, sealed] = l.split(' ');
+		const [id, , online, sealed, streams] = l.split(' ');
 		if (!sealed || sealed === '-') continue;
 		const blob = unb64u(sealed), n = hk.run('hkw_name_open', cat(K, blob), 32 + blob.length);
 		const name = n > 0 ? new TextDecoder().decode(hk.out(n)) : '';
 		if (online !== '1' || !name.startsWith('code:')) continue;
 		const [host, dir] = name.slice(5).split('\t');
-		out.push({ id, host: host || 'computer', dir: dir || '', name: (dir || '').split('/').filter(Boolean).pop() || host });
+		const base = (dir || '').split('/').filter(Boolean).pop() || host;
+		const tags = !streams || streams === '-' ? ['.'] : streams.split(',');
+		tags.forEach((t, k) => out.push({ id: t === '.' ? id : id + '/' + t, device: id, host: host || 'computer', dir: dir || '',
+			name: tags.length > 1 ? base + ' \u00b7 ' + (k + 1) : base }));
 	}
 	return out;
 }
 
-/* ---- the remote carrier: this page's /api, sealed, to one computer ---- */
-let remote = null;
-if (REMOTE_ID) {
-	const enc = new TextEncoder(), dec = new TextDecoder();
+/* ---- where /api goes ----
+   To the session this page shows: a code session's carrier, or this browser's own
+   agent (the wasm build). Anything else, and every call on `hako --serve`, is the
+   network. Switching sessions only changes REMOTE_ID; nothing reloads. */
+const netFetch = globalThis.fetch.bind(globalThis), NetES = globalThis.EventSource;
+let localApi = null;                   /* { fetch, ES } once this browser's agent is up */
+const apiNow = () => (REMOTE_ID ? carriers.get(REMOTE_ID) : localApi) || null;
+window.fetch = (input, init) => {
+	const url = typeof input === 'string' ? input : input.url;
+	const b = url.startsWith('/api/') ? apiNow() : null;
+	if (window.hakoDebug && b) hakoTrace('[api] fetch', REMOTE_ID || 'local', url);
+	return b ? b.fetch(input, init) : netFetch(input, init);
+};
+window.EventSource = class {
+	constructor(url, o) { const b = apiNow(); return b ? new b.ES(url) : new NetES(url, o); }
+};
+
+/* ---- the remote carriers: this page's /api, sealed, to the computers it has open ----
+   Each code session this window opens gets a carrier: its own Noise session (a
+   hako.wasm slot) and its own numbered streams, all over this window's one stream
+   on the relay, which says who each frame is from. A carrier stays up while the
+   page shows another session, so leaving one never disconnects it, and its
+   events keep the menu's mark for it current (it asks something, it finished). */
+const carriers = new Map();            /* session id -> carrier, the most recently shown last */
+const CARRIERS = 8;                    /* hako.wasm's session slots (HKW_SESS) */
+const hkUse = (k) => (hk.ex.hkw_use ? hk.ex.hkw_use(k) === 0 : k === 0);   /* an older hako.wasm holds one */
+const remoteFatal = (m) => Object.assign(new Error(m), { fatal: true });
+
+/* This window's stream on the relay, shared by every carrier. A phone back from
+   sleep can hold one that died without a word: the relay writes every 25 s, so a
+   longer silence means it is gone. */
+const mux = {
+	gen: 0, reader: null, heard: 0, opening: null,
+	open() {
+		if (this.reader) return Promise.resolve();
+		return this.opening || (this.opening = this.start().finally(() => { this.opening = null; }));
+	},
+	async start() {
+		const r = await relay.down();
+		if (r.status === 401) relay.forget();   /* the next try signs in again */
+		if (!r.ok) throw new Error('can’t connect right now');
+		const rd = r.body.getReader(), mine = ++this.gen, td = new TextDecoder();
+		this.reader = rd; this.heard = Date.now();
+		(async () => {
+			let buf = '';
+			for (;;) {
+				let value, done;
+				try { ({ value, done } = await rd.read()); } catch (e) { break; }   /* a dropped network */
+				if (done) break;
+				this.heard = Date.now();
+				if (window.hakoDebug) hakoTrace('[remote] down', value.length);
+				buf += td.decode(value, { stream: true });
+				let i;
+				while ((i = buf.indexOf('\n')) >= 0) {
+					const line = buf.slice(0, i); buf = buf.slice(i + 1);
+					const l = relayLine(line), c = l && carriers.get(l.from);
+					if (c) c.frame(unb64(l.body));
+					else if (line.startsWith('! offline ')) { const o = carriers.get(line.slice(10)); if (o) o.offline(); }
+				}
+			}
+			if (mine !== this.gen) return;
+			this.reader = null;
+			for (const c of [...carriers.values()]) c.lost();
+		})();
+	},
+	drop() { if (this.reader) this.reader.cancel().catch(() => {}); },
+	stale() { if (this.reader && !document.hidden && Date.now() - this.heard > 40000) this.drop(); },
+};
+document.addEventListener('visibilitychange', () => mux.stale());
+window.addEventListener('online', () => mux.stale());
+setInterval(() => mux.stale(), 10000);
+
+/* The carrier for a session, made on first use. Past CARRIERS the one shown least
+   recently closes. */
+function carrierFor(id) {
+	let c = carriers.get(id);
+	if (c && c.dead) { c.close(); c = null; }      /* never connected, or the key was wrong: try afresh */
+	if (c) { carriers.delete(id); carriers.set(id, c); return c; }
+	const cap = !hk.ex || hk.ex.hkw_use ? CARRIERS : 1;
+	while (carriers.size >= cap) ([...carriers.values()].find((x) => x.id !== REMOTE_ID) || carriers.values().next().value).close();
+	const used = new Set([...carriers.values()].map((x) => x.slot));
+	let slot = 0;
+	while (used.has(slot)) slot++;
+	c = makeCarrier(id, slot);
+	carriers.set(id, c);
+	return c;
+}
+
+function makeCarrier(id, slot) {
+	const enc = new TextEncoder();
 	const streams = new Map();
-	let nextSid = 1, ready = null, outq = [], sending = false;
-	let gen = 0, reader = null, heard = Date.now(), coming = false;
+	let nextSid = 1, outq = [], sending = false, coming = false, closed = false, hsWait = null;
+	const S = (fn, input, ...a) => { hkUse(slot); return hk.run(fn, input, ...a); };
+	const shown = () => id === REMOTE_ID;
+	const tell = (name, detail) => { if (shown()) window.dispatchEvent(new CustomEvent(name, { detail })); };
+	const c = { id, slot, ready: null, att: { asks: new Set(), busy: false, fresh: false } };
 
 	/* One upload at a time keeps the frames in order. Frames queued in the same
 	   moment (the handshake's last message and the first requests) wait a tick
@@ -1051,10 +1195,10 @@ if (REMOTE_ID) {
 		sending = true;
 		await new Promise((r) => setTimeout(r, 0));
 		while (outq.length) {
-			const batch = outq.splice(0, 32).map((f) => REMOTE_ID + ' ' + b64(f) + '\n').join('');
+			const batch = outq.splice(0, 32).map((f) => id + ' ' + b64(f) + '\n').join('');
 			let r;
-			try { r = await relay.req('POST', '/v1/up', batch); } catch (e) { break; }
-			if (r.status === 401) { relay.forget(); if (reader) reader.cancel().catch(() => {}); break; }   /* reconnects, signed in again */
+			try { r = await relay.up(id, batch); } catch (e) { break; }
+			if (r.status === 401) { relay.forget(); mux.drop(); break; }   /* reconnects, signed in again */
 		}
 		sending = false;
 	};
@@ -1062,115 +1206,84 @@ if (REMOTE_ID) {
 	/* sealed in send order, so the computer's nonce count stays in step */
 	const sendOp = (sid, op, data) => {
 		const p = cat(new Uint8Array([sid >>> 24, (sid >>> 16) & 255, (sid >>> 8) & 255, sid & 255, op]), data || new Uint8Array(0));
-		const n = hk.run('hkw_seal', p, p.length);
+		const n = S('hkw_seal', p, p.length);
 		if (n > 0) frame(2, hk.out(n));
 	};
 
-	let hsWait = null;
-	const onFrame = (f) => {
+	c.frame = (f) => {
+		if (closed) return;
 		if (f[0] === 1 && hsWait) { const w = hsWait; hsWait = null; w(f.subarray(1)); return; }
 		if (f[0] !== 2) return;
-		const n = hk.run('hkw_open', f.subarray(1), f.length - 1);
+		const n = S('hkw_open', f.subarray(1), f.length - 1);
 		if (n < 5) return;
 		const p = hk.out(n);
 		const sid = ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0, st = streams.get(sid);
-		if (window.hakoDebug) hakoTrace('[remote] frame sid', sid, 'op', p[4], 'len', n - 5, st ? '' : '(no stream)');
+		if (window.hakoDebug) hakoTrace('[remote] frame', id, 'sid', sid, 'op', p[4], 'len', n - 5, st ? '' : '(no stream)');
 		if (!st) return;
 		if (p[4] === 1) st.data(p.subarray(5)); else { streams.delete(sid); st.end(); }
 	};
+	c.offline = () => { if (hsWait) { const w = hsWait; hsWait = null; w(null); } };
 
-	const down = async () => {
-		const r = await fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + relay.token } });
-		if (r.status === 401) relay.forget();   /* the next try signs in again */
-		if (!r.ok) throw new Error('can\u2019t connect right now');
-		const rd = r.body.getReader(), mine = ++gen;
-		reader = rd; heard = Date.now();
-		let buf = '';
-		(async () => {
-			for (;;) {
-				let value, done;
-				try { ({ value, done } = await rd.read()); } catch (e) { break; }   /* a reload or a dropped network */
-				if (done) break;
-				heard = Date.now();
-				if (window.hakoDebug) hakoTrace('[remote] down', value.length);
-				buf += dec.decode(value, { stream: true });
-				let i;
-				while ((i = buf.indexOf('\n')) >= 0) {
-					const line = buf.slice(0, i); buf = buf.slice(i + 1);
-					if (line.startsWith(REMOTE_ID + ' ')) onFrame(unb64(line.slice(33)));
-					else if (line === '! offline ' + REMOTE_ID && hsWait) { const w = hsWait; hsWait = null; w(null); }
-				}
-			}
-			if (mine === gen) lost();
-		})();
-	};
-
-	const fatal = (m) => Object.assign(new Error(m), { fatal: true });
 	const connect = async () => {
-		if (window.hakoDebug) hakoTrace('[remote] connect');
+		if (window.hakoDebug) hakoTrace('[remote] connect', id);
 		await relay.signIn();
 		const K = await kvGet('k');
-		if (!relay.acct || !K) throw fatal('sign in on this device first');
-		await down();                          /* the relay lists the stream before it answers, so frames can go now */
-		hk.run('hkw_session', cat(relay.s, K));
+		if (!relay.acct || !K) throw remoteFatal('sign in on this device first');
+		await mux.open();                      /* the relay lists the stream before it answers, so frames can go now */
+		if (closed) throw remoteFatal('closed');
+		S('hkw_session', cat(relay.s, K));
 		const msg2 = new Promise((r) => { hsWait = r; setTimeout(() => { if (hsWait === r) { hsWait = null; r(null); } }, 8000); });
-		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
+		frame(1, hk.out(S('hkw_hs_write', null, 0)));
 		const m2 = await msg2;
 		if (!m2) throw new Error('that computer is not answering. is :remote on?');
-		if (hk.run('hkw_hs_read', m2, m2.length) < 0) throw fatal('that computer has a different account key');
-		frame(1, hk.out(hk.run('hkw_hs_write', null, 0)));
-		if (!hk.ex.hkw_ready()) throw new Error('the session did not finish');
+		if (S('hkw_hs_read', m2, m2.length) < 0) throw remoteFatal('that computer has a different account key');
+		frame(1, hk.out(S('hkw_hs_write', null, 0)));
+		if (!hkUse(slot) || !hk.ex.hkw_ready()) throw new Error('the session did not finish');
 	};
-	ready = connect();
+	c.ready = connect();
+	c.ready.catch(() => { c.dead = true; });
 
 	/* The stream died (a network change, a phone waking up): connect again in
-	   the background, and every open EventSource reopens and replays. Only a
-	   key problem gives up; a computer that is asleep is retried. */
-	const lost = () => {
-		if (coming) return;
+	   the background, and every open stream reopens and replays. Only a key
+	   problem gives up; a computer that is asleep is retried. */
+	c.lost = () => {
+		if (coming || closed) return;
 		coming = true;
 		outq.length = 0;                       /* sealed for the old session */
-		ready = (async () => {
+		c.ready = (async () => {
 			for (let wait = 300; ; wait = Math.min(wait * 2, 15000)) {
 				await new Promise((r) => setTimeout(r, wait));
 				while (document.hidden) await new Promise((r) => document.addEventListener('visibilitychange', r, { once: true }));
-				try { await connect(); coming = false; window.dispatchEvent(new Event('hako-remote-back')); return; }
+				if (closed) throw remoteFatal('closed');
+				try { await connect(); coming = false; tell('hako-remote-back'); return; }
 				catch (e) {
-					if (window.hakoDebug) hakoTrace('[remote] retry', e.message);
-					if (e.fatal) { coming = false; window.dispatchEvent(new CustomEvent('hako-remote-lost', { detail: e.message })); throw e; }
-					window.dispatchEvent(new CustomEvent('hako-remote-retry', { detail: e.message }));
+					if (window.hakoDebug) hakoTrace('[remote] retry', id, e.message);
+					if (e.fatal) { coming = false; c.dead = true; tell('hako-remote-lost', e.message); throw e; }
+					tell('hako-remote-retry', e.message);
 				}
 			}
 		})();
-		ready.catch(() => {});
+		c.ready.catch(() => {});
 		for (const st of streams.values()) st.end(true);
 		streams.clear();
 	};
-	/* A phone back from sleep can hold a stream that died without a word: the
-	   relay writes every 25 s, so a longer silence means it is gone. */
-	const stale = () => { if (!coming && reader && !document.hidden && Date.now() - heard > 40000) reader.cancel().catch(() => {}); };
-	document.addEventListener('visibilitychange', stale);
-	window.addEventListener('online', stale);
-	setInterval(stale, 10000);
 
 	/* one HTTP exchange over a new stream; the reply ends when the computer closes it */
 	const open = async (head, body, onData, onEnd) => {
-		await ready;
+		await c.ready;
+		if (closed) throw remoteFatal('closed');
 		const sid = nextSid++;
 		streams.set(sid, { data: onData, end: onEnd });
-		if (window.hakoDebug) hakoTrace('[remote] open', sid, head.split('\r\n')[0]);
+		if (window.hakoDebug) hakoTrace('[remote] open', id, sid, head.split('\r\n')[0]);
 		const req = cat(enc.encode(head), body || new Uint8Array(0));
 		for (let o = 0; o < req.length || o === 0; o += 48000) { sendOp(sid, 1, req.subarray(o, o + 48000)); if (!req.length) break; }
 		return sid;
 	};
 	const reqHead = (method, url, n) => method + ' ' + url + ' HTTP/1.1\r\nHost: relay\r\nContent-Type: text/plain\r\nContent-Length: ' + n + '\r\n\r\n';
 
-	const origFetch = window.fetch.bind(window);
 	const asking = new Map();   /* GETs on their way: the page asks for the same list from several places at once */
-	window.fetch = async (input, init) => {
+	c.fetch = async (input, init) => {
 		const url = typeof input === 'string' ? input : input.url;
-		if (window.hakoDebug) hakoTrace('[remote] fetch', url);
-		if (!url.startsWith('/api/')) return origFetch(input, init);
 		const method = (init && init.method) || 'GET';
 		if (method !== 'GET') return carry(method, url, init);
 		let p = asking.get(url);
@@ -1189,35 +1302,99 @@ if (REMOTE_ID) {
 		const he = text.indexOf('\r\n\r\n');
 		const status = parseInt(text.slice(9, 12), 10) || 502;
 		const headers = new Headers();
-		for (const l of text.slice(0, he).split('\r\n').slice(1)) { const c = l.indexOf(':'); if (c > 0) headers.append(l.slice(0, c), l.slice(c + 1).trim()); }
+		for (const l of text.slice(0, he).split('\r\n').slice(1)) { const c2 = l.indexOf(':'); if (c2 > 0) headers.append(l.slice(0, c2), l.slice(c2 + 1).trim()); }
 		return new Response(status === 204 ? null : all.subarray(he + 4), { status, headers });
 	};
 
-	/* /api/events, parsed as it streams */
-	window.EventSource = class {
-		constructor(url) {
-			this.onopen = null; this.onmessage = null; this.onerror = null;
-			const fail = () => { if (this.onerror) this.onerror(new Event('error')); };
-			const start = () => {
-				let buf = '', head = true;
-				const td = new TextDecoder();
-				open(reqHead('GET', url, 0), null, (d) => {
-					buf += td.decode(d, { stream: true });
-					if (head) { const i = buf.indexOf('\r\n\r\n'); if (i < 0) return; buf = buf.slice(i + 4); head = false; if (this.onopen) this.onopen(); }
-					let i;
-					while ((i = buf.indexOf('\n\n')) >= 0) {
-						const ev = buf.slice(0, i); buf = buf.slice(i + 2);
-						const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
-						if (data && this.onmessage) this.onmessage({ data });
-					}
-				}, (dropped) => { fail(); if (dropped && !this.closed) start(); }).catch(fail);   /* the reopen waits for the new session */
-			};
-			start();
+	/* What the menu shows for a session out of sight: it asks something (an
+	   approval, a choice, a question), it is working, or it finished since it was
+	   last shown. The replay on (re)connect rebuilds the asks; only live events
+	   mark a finish. */
+	let replayTill = 0;
+	const seen = (data) => {
+		const a = c.att;
+		let m;
+		try { m = JSON.parse(data); } catch (e) { return; }
+		switch (m.type) {
+			case 'tool_request': a.asks.add('t' + m.id); break;
+			case 'tool_decision': a.asks.delete('t' + m.id); break;
+			case 'choice_request': a.asks.add('c' + m.id); break;
+			case 'choice_decision': a.asks.delete('c' + m.id); break;
+			case 'input_request': a.asks.add('in'); break;
+			case 'message': if (m.role === 'user') { a.busy = true; a.asks.delete('in'); } break;
+			case 'done': case 'error':
+				a.busy = false; a.asks.clear();
+				if (!shown() && Date.now() > replayTill) a.fresh = true;
+				break;
+			default: return;
 		}
-		close() { this.closed = true; }
+		window.dispatchEvent(new Event('hako-attention'));
 	};
-	remote = { ready };
+
+	/* One /api/events per carrier for as long as it lives: the page reads it while
+	   this session is shown, the mark always. Kept as the computer sends it, so
+	   showing this session again replays what a fresh connection would. */
+	const ring = [], subs = new Set();
+	let evOpen = false, evSid = 0;
+	const events = () => {
+		let buf = '', head = true;
+		const td = new TextDecoder();
+		const fail = () => { evOpen = false; for (const s of subs) s.fail(); };
+		open(reqHead('GET', '/api/events', 0), null, (d) => {
+			buf += td.decode(d, { stream: true });
+			if (head) {
+				const i = buf.indexOf('\r\n\r\n');
+				if (i < 0) return;
+				buf = buf.slice(i + 4); head = false;
+				ring.length = 0; evOpen = true; replayTill = Date.now() + 1500;
+				c.att.asks.clear(); c.att.busy = false;
+				for (const s of subs) s.open();
+			}
+			let i;
+			while ((i = buf.indexOf('\n\n')) >= 0) {
+				const ev = buf.slice(0, i); buf = buf.slice(i + 2);
+				const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+				if (!data) continue;
+				ring.push(data);
+				if (ring.length > 2048) ring.shift();         /* hako's own ring (HS_RING) */
+				seen(data);
+				for (const s of subs) s.msg(data);
+			}
+		}, (dropped) => { fail(); if (dropped && !closed) events(); })   /* the reopen waits for the new session */
+			.then((sid) => { evSid = sid; }, fail);
+	};
+	events();
+	c.ES = class {
+		constructor() {
+			this.onopen = null; this.onmessage = null; this.onerror = null;
+			this.sub = {
+				open: () => { if (this.onopen) this.onopen(); },
+				msg: (data) => { if (this.onmessage) this.onmessage({ data }); },
+				fail: () => { if (this.onerror) this.onerror(new Event('error')); },
+			};
+			setTimeout(() => {                     /* the handlers come after the constructor */
+				if (this.closed) return;
+				subs.add(this.sub);
+				if (evOpen) { this.sub.open(); for (const d of ring) this.sub.msg(d); }
+			}, 0);
+		}
+		close() { this.closed = true; subs.delete(this.sub); }
+	};
+
+	/* gone for good: the computer stops its streams, and no key stays in the page */
+	c.close = () => {
+		if (closed) return;
+		if (evSid && !coming) try { sendOp(evSid, 3); } catch (e) {}
+		closed = true;
+		carriers.delete(id);
+		for (const st of streams.values()) st.end(true);
+		streams.clear(); subs.clear();
+		if (hk.ex && hk.ex.hkw_drop) hk.ex.hkw_drop(slot);
+		window.dispatchEvent(new Event('hako-attention'));
+	};
+	return c;
 }
+if (REMOTE_ID) carrierFor(REMOTE_ID);
 
 /* ---- the account sheet ---- */
 /* The providers' own marks (GitHub's octicon, Google's G), a key for a passkey,
@@ -1356,12 +1533,17 @@ window.hakoAccount = {
 	   forgets everything here (device key, account key), so the next sign-in
 	   starts as a new device and may pick another account. */
 	async signOut() {
-		try { await relay.signIn(); if (relay.acct && relay.id) await relay.req('POST', '/v1/revoke', relay.id); } catch (e) {}
+		try {
+			relay.token = ''; relay.at = 0; await relay.signIn();
+			if (relay.acct && relay.id) await relay.req('POST', '/v1/revoke', relay.id);
+		} catch (e) {}
 		await kvClear();
 		Object.assign(relay, { token: '', id: '', acct: '', s: null, at: 0 });
 		relay.keep(null);
-		if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
-		if (this.show) await this.show(false);
+		for (const c of [...carriers.values()]) c.close();
+		mux.drop();
+		if (REMOTE_ID) showSession('');          /* shows chat, and the menu without code */
+		else if (this.show) await this.show(false);
 		this.renderAcct();
 	},
 	/* Everything bound to the account, to clear out what is gone: a device with no way
@@ -1483,9 +1665,8 @@ window.hakoAccount = {
 				if (ok) history.replaceState(null, '', location.pathname);
 				else try { await pairDevice(pairTo[1], pairTo[2]); await settleKey(); say('added. this browser holds your account key now.'); ok = true; }
 				catch (e) { fail(e); }
-				if (ok && (await codeSessions()).some((c) => c.id === pairTo[1])) {
-					location.hash = '#remote=' + pairTo[1]; location.reload(); return;
-				}
+				const into = ok && (await codeSessions()).find((c) => c.device === pairTo[1]);
+				if (into) { m.close(); showSession(into.id); return; }
 			}
 			const v = await kvGet('via'), info = document.createElement('div');
 			info.className = 'acctinfo';
@@ -1501,7 +1682,7 @@ window.hakoAccount = {
 				btn('use a passkey', async () => { try { await passkeyLogin(); signedIn(); } catch (e) { fail(e); } }, m.body);
 			} else if (!list.length) say('none open. in a terminal, run :remote on in hako to share that folder here.');
 			for (const c of list) m.body.appendChild(optionRow(c.name, c.host + (c.dir ? ' \u00b7 ' + c.dir : ''), '', () => {
-				location.hash = '#remote=' + c.id; location.reload();
+				m.close(); if (c.id !== REMOTE_ID) showSession(c.id);
 			}, c.id === REMOTE_ID));
 			m.body.appendChild(optionRow('+ add a device', '', '', () => { m.close(); this.addDevice(); }));
 			m.body.appendChild(optionRow('your devices', '', '', () => { m.close(); this.devices(); }));
@@ -1588,7 +1769,6 @@ window.hakoAccount = {
 		/* chat is this browser's own agent; code is a session on one of your computers */
 		$('mode-chat').classList.toggle('on', !REMOTE_ID);
 		$('mode-code').classList.toggle('on', !!REMOTE_ID);
-		const go = (id) => { location.hash = '#remote=' + id; location.reload(); };
 		/* code without a session open is the code landing: pick a folder, say what to do */
 		const pick = (code) => {
 			$('mode-chat').classList.toggle('on', !code); $('mode-code').classList.toggle('on', code);
@@ -1609,27 +1789,47 @@ window.hakoAccount = {
 		};
 		const projects = async () => {
 			const list = await codeSessions(), el = $('project-list'), here = $('here');
+			/* one open here that is no longer live (:remote off) lets go of its slot; an
+			   empty list may be a relay that did not answer, so it closes nothing */
+			if (list.length) for (const c of [...carriers.values()]) if (c.id !== REMOTE_ID && !list.some((x) => x.id === c.id)) c.close();
 			$('projects').after(here);                 /* out first: clearing the list would take it along */
 			el.textContent = '';
-			for (const c of list) el.appendChild(row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) go(c.id); }));
+			for (const c of list) {
+				const b = row(c.name, c.host, ' k-code' + (c.id === REMOTE_ID ? ' cur' : ''), () => { closeNav(); if (c.id !== REMOTE_ID) showSession(c.id); });
+				b.dataset.code = c.id;
+				el.appendChild(b);
+			}
+			marks();
 			const open = el.querySelector('.sess.cur');
 			if (open) open.after(here);                /* a folder's chats sit under that folder */
 			$('projects').hidden = !list.length;
 			window.hakoCodeLanding(list);
 			applySearch();
 		};
+		/* A session open in this window but not shown: a mark says it is asking
+		   something, working, or finished since it was last shown. */
+		const marks = () => {
+			for (const b of document.querySelectorAll('#project-list .sess[data-code]')) {
+				const c = carriers.get(b.dataset.code), a = c && c.id !== REMOTE_ID ? c.att : null;
+				const k = !a ? '' : a.asks.size ? 'ask' : a.busy ? 'busy' : a.fresh ? 'fresh' : '';
+				b.classList.toggle('cur', b.dataset.code === REMOTE_ID);
+				b.dataset.att = k;
+				b.title = k === 'ask' ? 'waiting for you' : k === 'busy' ? 'working' : k === 'fresh' ? 'finished' : c ? 'open in this window' : '';
+			}
+		};
+		window.addEventListener('hako-attention', marks);
 		/* signed in, chat lists code sessions above this browser's chats; code lists
 		   code only (inside a session, that folder's chats are code too) */
 		const show = async (code) => {
 			pick(code);
-			$('here').hidden = code && !REMOTE_ID;
+			$('here').hidden = !!code || !!REMOTE_ID;    /* a remote session shows itself, not the folder's other chats */
 			if (code) return projects();
 			if (!(await kvGet('k'))) { $('projects').hidden = true; return; }
 			try { await relay.signIn(); await projects(); } catch (e) { $('projects').hidden = true; }
 		};
 		this.show = show;
 		$('mode-chat').addEventListener('click', () => {
-			if (REMOTE_ID) { location.hash = ''; location.reload(); return; }
+			if (REMOTE_ID) { showSession(''); return; }
 			show(false);
 		});
 		$('mode-code').addEventListener('click', async () => {
@@ -1641,28 +1841,31 @@ window.hakoAccount = {
 		this.renderAcct();
 		if (await kvGet('acct')) relay.signIn().then(async () => { try { await settleKey(); } catch (e) {} this.renderAcct(); }, () => {});
 		if (HASH === '#signin' || INVITE) history.replaceState(null, '', location.pathname);
-		window.addEventListener('hashchange', () => { if (/^#(signin|invite=|link=|pair=|remote=)/.test(location.hash)) location.reload(); });
+		window.addEventListener('hashchange', () => {
+			const r = location.hash.match(REMOTE_RE);
+			if (r) { if (r[1] !== REMOTE_ID) showSession(r[1]); }
+			else if (/^#(signin|invite=|link=|pair=|remote=)/.test(location.hash)) location.reload();
+		});
 		window.addEventListener('hako-remote-lost', (e) => {
 			const m = modal('the connection dropped');
 			const n = document.createElement('div'); n.className = 'note'; n.textContent = e.detail || ''; m.body.appendChild(n);
-			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => location.reload()); m.foot.appendChild(b);
+			const b = document.createElement('button'); b.textContent = 'reconnect'; b.addEventListener('click', () => { m.close(); showSession(REMOTE_ID); }); m.foot.appendChild(b);
 		});
 		window.addEventListener('hako-remote-retry', (e) => { meta.textContent = 'reconnecting: ' + e.detail; });
 		window.addEventListener('hako-remote-back', () => refreshState());
 		if (LINK) this.open(LINK);
 		else if (PAIR) this.open(null, PAIR);
 		else if (SSO_BACK || HASH === '#signin' || INVITE) this.open();      /* one sheet, also back from GitHub or Google */
+		window.addEventListener('hako-remote-ready', () => projects());
 		if (!REMOTE_ID) show(false);
-		else pick(true);
-		if (REMOTE_ID) {
-			remote.ready.then(() => { projects(); window.dispatchEvent(new Event('hako-remote-ready')); })
-				.catch((e) => { const m = modal('could not reach that computer'); const n = document.createElement('div'); n.className = 'note'; n.textContent = e.message; m.body.appendChild(n);
-					const b = document.createElement('button'); b.textContent = 'back to this browser'; b.addEventListener('click', () => { location.hash = ''; location.reload(); }); m.foot.appendChild(b); });
-		}
+		else { pick(true); watchRemote(REMOTE_ID); }
 	},
 };
 
-if (HAKO_WASM_MODE && !REMOTE_ID) {
+/* This browser's own agent, started the first time chat is shown, then kept: a
+   code session shown in between leaves it running. */
+function bootLocal() {
+	if (localApi || !HAKO_WASM_MODE) return;
 	const worker = new Worker('hako-worker.js', { type: 'module' });
 	const ring = [];                       /* events, so a late listener sees them */
 	let listeners = [];
@@ -1867,10 +2070,8 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 		},
 	};
 
-	const origFetch = window.fetch.bind(window);
-	window.fetch = async (input, init) => {
+	const localFetch = async (input, init) => {
 		const url = typeof input === 'string' ? input : input.url;
-		if (!url.startsWith('/api/')) return origFetch(input, init);
 		const path = url.split('?')[0];
 		const query = new URLSearchParams(url.split('?')[1] || '');
 		if (path === '/api/image') {
@@ -2087,18 +2288,22 @@ if (HAKO_WASM_MODE && !REMOTE_ID) {
 
 	/* EventSource itself cannot be intercepted by patching fetch, so give the UI
 	   one that reads from the same in-page stream. */
-	window.EventSource = class {
+	class LocalES {
 		constructor() {
 			this.onopen = null; this.onmessage = null; this.onerror = null;
+			this.fn = (o) => this.onmessage && this.onmessage({ data: JSON.stringify(o) });
 			setTimeout(() => {
+				if (this.closed) return;
 				if (this.onopen) this.onopen();
-				ring.forEach((o) => this.onmessage && this.onmessage({ data: JSON.stringify(o) }));
-				listeners.push((o) => this.onmessage && this.onmessage({ data: JSON.stringify(o) }));
+				ring.forEach(this.fn);
+				listeners.push(this.fn);
 			}, 0);
 		}
-		close() {}
-	};
+		close() { this.closed = true; listeners = listeners.filter((f) => f !== this.fn); }
+	}
+	localApi = { fetch: localFetch, ES: LocalES };
 }
+if (!REMOTE_ID) bootLocal();
 </script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -2212,6 +2417,7 @@ let busy = false;
 let state = { provider: '', model: '', turns: 0, session: '', dir: '', version: '',
               home: '', places: [], folder: '', root: '',
               session_name: '', theme: '', theme_slots: null, commands: null, remote: false, update: null, voice: 0, mode: '', yolo: 0 };
+const STATE0 = JSON.stringify(state);    /* a session newly shown starts from here */
 const askBoxes = new Map();
 
 /* ---------- capability handshake ----------
@@ -2220,7 +2426,7 @@ const askBoxes = new Map();
    can outrun the binary serving it). So ask what this core supports and degrade,
    never assume a version. */
 let caps = new Set();
-const isWasm = !!document.querySelector('meta[name="hako-mode"][content="wasm"]') && !REMOTE_ID;
+const isWasmNow = () => HAKO_WASM_MODE && !REMOTE_ID;    /* this browser's own agent is the one shown */
 /* Shown in the header so "is this the new build?" has an answer. */
 const buildId = (document.querySelector('meta[name="hako-build"]') || {}).content || '';
 /* The fields a core may add to /api/state, the init event or a state event
@@ -2242,8 +2448,10 @@ function takeState(j) {
 	renderChrome();
 }
 async function handshake() {
+	const at = REMOTE_ID;                 /* a reply from a session no longer shown is dropped */
 	try {
 		const j = await (await fetch('/api/state?for=studio')).json();
+		if (at !== REMOTE_ID) return;
 		caps = new Set(j.caps || []);
 		state.provider = j.provider || ''; state.model = j.model || '';
 		state.turns = j.turns || 0; state.dir = j.dir || ''; state.version = j.version || '';
@@ -2257,7 +2465,7 @@ async function handshake() {
 		if (j.awaiting_input) askInput({ prompt: j.input_prompt, hidden: j.input_hidden });
 		if (j.busy) setBusy(true);                      /* a reload mid-turn: still running there */
 		else { pendingInput = null; renderPending(); }
-	} catch (e) { caps = new Set(); }
+	} catch (e) { if (at === REMOTE_ID) caps = new Set(); }
 	renderChrome();
 }
 async function refreshState() {
@@ -2922,7 +3130,7 @@ async function saveOut(path, name) {
    a person needs to know about this build, not something to discover when it
    disappears. */
 function browserNotice() {
-	if (!isWasm || settings.browser_notice || LINK || PAIR || INVITE || SSO_BACK || HASH === '#signin') return;
+	if (!isWasmNow() || settings.browser_notice || LINK || PAIR || INVITE || SSO_BACK || HASH === '#signin') return;
 	const m = modal('this runs in your browser');
 	const n = document.createElement('div');
 	n.className = 'note';
@@ -3011,7 +3219,7 @@ async function openBrowser() {
 	};
 
 	const draw = async (p) => {
-		if (isWasm && !state.folder && !state.dir) {
+		if (isWasmNow() && !state.folder && !state.dir) {
 			m.body.textContent = '';
 			m.title.textContent = 'no folder open';
 			const remembered = window.hakoPendingFolder && window.hakoPendingFolder();
@@ -3077,7 +3285,7 @@ async function openBrowser() {
 
 		/* Quiet, but always there: people need to know where this lives, and the
 		   one-time notice at first run is long forgotten by now. */
-		if (isWasm && !state.folder) {
+		if (isWasmNow() && !state.folder) {
 			const w = document.createElement('div');
 			w.className = 'note';
 			w.style.opacity = '.72';
@@ -3101,7 +3309,7 @@ async function openBrowser() {
 				draw(up.startsWith(floor) ? up : floor);
 			}));
 
-		const removable = isWasm && !state.folder;
+		const removable = isWasmNow() && !state.folder;
 		const withRemove = (row, full, label) => {
 			if (!removable) return row;
 			const wrap = document.createElement('div');
@@ -3133,7 +3341,7 @@ async function openBrowser() {
 
 		if (files.length) {
 			m.body.appendChild(groupLabel(files.length + ' file' + (files.length === 1 ? '' : 's') + ' here'));
-			const savable = isWasm && !state.folder && caps.has('save');
+			const savable = isWasmNow() && !state.folder && caps.has('save');
 			files.slice(0, 40).forEach((f) => {
 				const full = (path === '/' ? '' : path) + '/' + f.name;
 				/* on a computer the file is already where the agent can read it: a tap names it in the next message */
@@ -3192,7 +3400,7 @@ async function openBrowser() {
 	};
 
 	let sysBtn = null;
-	if (isWasm) {
+	if (isWasmNow()) {
 		if (caps.has('pickfolder')) {
 			sysBtn = mb('choose folder…', '', async () => {
 				let handle;
@@ -3331,7 +3539,7 @@ function openSettings() {
 	});
 
 	/* The browser build has no engine and no disk to search: only --serve can use this. */
-	if (!isWasm) {
+	if (!isWasmNow()) {
 	m.body.appendChild(groupLabel('where to look for model weights'));
 	const note = document.createElement('div');
 	note.className = 'note';
@@ -3357,7 +3565,7 @@ function openSettings() {
 	}
 
 	/* hako on a computer: start this folder over (fresh session state, same agent) */
-	if (!isWasm && caps.has('open')) {
+	if (!isWasmNow() && caps.has('open')) {
 		m.body.appendChild(groupLabel('this folder'));
 		m.body.appendChild(optionRow('reload this folder', 'fresh session state, same agent', '', async () => {
 			m.close(); clearLog(); add('turn system', '', 'reloading this folder\u2026');
@@ -3556,9 +3764,11 @@ function when(ts) {
 /* This folder's sessions (in the browser, this browser's chats), newest first. */
 let sessionList = [];
 async function loadSessions() {
+	const at = REMOTE_ID;
 	try {
 		const r = await fetch('/api/sessions');
 		const j = await r.json();
+		if (at !== REMOTE_ID) return;
 		state.dir = j.dir || state.dir || '';
 		/* A session with no prompt in it is noise: every page that opens makes one. */
 		sessionList = (j.sessions || []).filter((s) => s.title || (s.id === state.session && state.session_name))
@@ -3718,7 +3928,9 @@ async function loadFiles() {
 	if (!filesEl) return;
 	try {
 		if (document.body.classList.contains('codeland')) { filesEl.textContent = ''; $('files-label').hidden = true; return; }
+		const at = REMOTE_ID;
 		const j = await (await fetch('/api/dirs?path=' + encodeURIComponent(state.dir || '.'))).json();
+		if (at !== REMOTE_ID) return;
 		let files = (j.files || []).filter((f) => f.name && f.name[0] !== '.');
 		files = files.some((f) => f.mtime) ? files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
 		                                   : files.sort((a, b) => a.name.localeCompare(b.name));
@@ -3744,13 +3956,13 @@ async function loadFiles() {
    after a short settle, so a stale prompt cannot pop a box that is already dealt with. */
 let replaying = true, settleTimer = setTimeout(() => { replaying = false; }, 1200);
 
-const es = new EventSource('/api/events');
-es.onopen = () => {                   /* also after a remote reconnect: the ring replays again */
+let es = null;
+const esOpen = () => {                /* also after a remote reconnect: the ring replays again */
 	dot.classList.add('on'); clearLog(); renderMeta();
 	replaying = true; clearTimeout(settleTimer); settleTimer = setTimeout(() => { replaying = false; }, 1200);
 };
-es.onerror = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
-es.onmessage = (ev) => {
+const esError = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
+const esMessage = (ev) => {
 	let m;
 	try { m = JSON.parse(ev.data); } catch (e) { return; }
 
@@ -3834,6 +4046,48 @@ es.onmessage = (ev) => {
 		case 'error': dropLive(); add('turn error', '', m.text || 'error'); setBusy(false); break;
 	}
 };
+function openEvents() {
+	if (es) es.close();
+	es = new EventSource('/api/events');
+	es.onopen = esOpen; es.onerror = esError; es.onmessage = esMessage;
+}
+openEvents();
+
+/* ---------- switching sessions ----------
+   The page shows one session at a time: a code session ('<id>' or '<id>/<tag>')
+   or this browser's own chat (''). Switching moves /api to that one and redraws
+   from its replay, as a fresh page would; nothing reloads, and the session left
+   stays connected, its mark in the menu kept current. */
+let shownGen = 0;
+function showSession(id) {
+	id = id || '';
+	const gen = ++shownGen;
+	if (es) { es.close(); es = null; }
+	REMOTE_ID = id;
+	if (id) carrierFor(id).att.fresh = false; else bootLocal();
+	history.replaceState(null, '', location.pathname + (id ? '#remote=' + id : ''));
+	state = JSON.parse(STATE0); caps = new Set(); pendingInput = null; sessionList = [];
+	clearLog(); setBusy(false); renderPending(); renderSessions(); renderMeta();
+	openEvents();
+	window.dispatchEvent(new Event('hako-attention'));
+	if (window.hakoAccount.show) window.hakoAccount.show(!!id);
+	const done = refreshState();
+	if (id) watchRemote(id);
+	return done.then(() => gen === shownGen);
+}
+/* a code session's first connection: the menu learns it is up, or the page says why not */
+function watchRemote(id) {
+	const c = carriers.get(id);
+	if (!c) return;
+	c.ready.then(() => window.dispatchEvent(new Event('hako-remote-ready')), (e) => {
+		if (REMOTE_ID !== id) return;
+		const m = modal('could not reach that computer');
+		m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: e.message }));
+		const b = document.createElement('button'); b.textContent = 'back to this browser';
+		b.addEventListener('click', () => { m.close(); showSession(''); });
+		m.foot.appendChild(b);
+	});
+}
 
 /* ---------- the page around the chat: wordmark, title, indicators, chips ---------- */
 /* HAKO and CODE in Dela Gothic One (OFL), as outlines: no font file to ship.
@@ -3940,12 +4194,11 @@ function openModePicker() {
 	const cur = state.mode || (state.yolo ? 'auto' : 'ask');
 	const MODES = [['ask', 'every tool asks you first'], ['plan', 'reads and plans, changes nothing'], ['auto', 'tools run without asking']];
 	for (const [k, d] of MODES) {
-		const b = optionRow(k, REMOTE_ID && k === 'auto' ? 'only at the computer itself' : d, '', async () => {
+		const b = optionRow(k, REMOTE_ID && k === 'auto' ? 'tools run without asking, until remote turns off' : d, '', async () => {
 			m.close();
 			state.mode = k; state.yolo = k === 'auto' ? 1 : 0; renderPills();
 			await quietSlash(':mode ' + k);
 		}, k === cur);
-		if (REMOTE_ID && k === 'auto') b.disabled = true;
 		m.body.appendChild(b);
 	}
 	const g = document.createElement('div'); g.className = 'grow';
@@ -4232,42 +4485,8 @@ function applySearch() {
 const UNSAFE = /^[:/](models?|providers?|theme|login(\s+api)?)\s*$/i;
 const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
 
-/* Temporary, for the home-screen layout on iOS, which nothing but the phone can
-   show: type #probe and it lists every height the page could use, and draws them. */
-function viewportProbe() {
-	const box = document.createElement('div');
-	box.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(236,231,218,.92);color:#111;font:12px/1.35 monospace';
-	const unit = (u) => { const d = document.createElement('div'); d.style.cssText = 'position:absolute;width:1px;height:' + u; box.appendChild(d); const h = d.getBoundingClientRect().height; d.remove(); return h; };
-	document.body.appendChild(box);
-	const inset = document.createElement('div');
-	inset.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)';
-	box.appendChild(inset);
-	const v = window.visualViewport, cs = getComputedStyle(inset), root = getComputedStyle(document.documentElement);
-	const vals = [['vh', unit('100vh'), '#c00'], ['dvh', unit('100dvh'), '#06c'], ['lvh', unit('100lvh'), '#080'], ['svh', unit('100svh'), '#c60'],
-		['inner', window.innerHeight, '#808'], ['screen', screen.height, '#000'], ['fixed', box.getBoundingClientRect().height, '#0aa']];
-	vals.forEach(([, h, c], i) => { const s = document.createElement('div'); s.style.cssText = 'position:fixed;top:0;width:12px;right:' + (i * 15 + 2) + 'px;height:' + h + 'px;background:' + c; box.appendChild(s); });
-	const foot = document.createElement('div');
-	foot.style.cssText = 'position:fixed;left:8px;bottom:0;background:#060;color:#fff;padding:2px 8px';
-	foot.textContent = 'bottom:0, tap to close';
-	box.appendChild(foot);
-	const t = document.createElement('div');
-	t.style.cssText = 'position:absolute;left:8px;right:112px;top:calc(env(safe-area-inset-top) + 8px);white-space:pre-wrap';
-	t.textContent = ['standalone ' + navigator.standalone + ' / display-mode ' + matchMedia('(display-mode: standalone)').matches,
-		navigator.userAgent.replace(/^.*?OS /, 'OS ').slice(0, 40),
-		'screen ' + screen.width + 'x' + screen.height + ' avail ' + screen.availHeight,
-		'inner ' + innerWidth + 'x' + innerHeight + ' outer ' + outerHeight + ' client ' + document.documentElement.clientHeight,
-		'vv h ' + (v && v.height) + ' top ' + (v && v.offsetTop) + ' page ' + (v && v.pageTop),
-		'safe top ' + cs.paddingTop + ' bottom ' + cs.paddingBottom,
-		vals.map(([n, h]) => n + ' ' + h).join(', '),
-		'--vh ' + root.getPropertyValue('--vh') + ' --vt ' + root.getPropertyValue('--vt') + ' body ' + document.body.getBoundingClientRect().height,
-		'strips right to left: red vh, blue dvh, green lvh, orange svh, purple inner, black screen, teal fixed'].join('\n');
-	box.appendChild(t);
-	box.addEventListener('click', () => box.remove());
-}
-
 form.addEventListener('submit', (e) => {
 	e.preventDefault();
-	if (input.value.trim() === '#probe') { input.value = ''; viewportProbe(); return; }
 	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
 	if (!text && !attached.length) return;
@@ -4277,8 +4496,8 @@ form.addEventListener('submit', (e) => {
 	/* code, nothing open yet: the message goes to the session picked above it */
 	if (codeLanding()) {
 		if (!codePick || !text) { flashStatus(codePick ? 'say what to do first' : 'pick a code session first'); return; }
-		try { sessionStorage.setItem('hako-send', JSON.stringify({ id: codePick, text })); } catch (e2) {}
-		location.hash = '#remote=' + codePick; location.reload();
+		input.value = ''; syncInput();
+		showSession(codePick).then((still) => { if (still) { wantSlide = true; setBusy(true); post('/api/prompt', text); } });
 		return;
 	}
 	if (text && hist[hist.length - 1] !== text) { hist.push(text); if (hist.length > 100) hist.shift(); }
@@ -4451,13 +4670,23 @@ if (window.visualViewport) {
 	const vv = window.visualViewport;
 	document.body.classList.toggle('app', navigator.standalone === true);
 	const isOpen = () => vv.height < window.innerHeight - 80;
+	/* How far a fixed layer really reaches: on iOS 26 the window can claim the whole
+	   screen while fixed layers stop short, which hid the composer once. */
+	const reach = () => {
+		const p = document.createElement('div');
+		p.style.cssText = 'position:fixed;top:0;bottom:0;visibility:hidden';
+		document.body.appendChild(p);
+		const h = p.getBoundingClientRect().height;
+		p.remove();
+		return h;
+	};
 	const pan = () => {
 		if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
 		document.documentElement.style.setProperty('--vt', (isOpen() ? vv.offsetTop : 0) + 'px');
 	};
 	const sync = () => {
 		const open = isOpen();
-		document.documentElement.style.setProperty('--vh', (open ? vv.height : window.innerHeight) + 'px');
+		document.documentElement.style.setProperty('--vh', (open ? vv.height : Math.min(window.innerHeight, reach())) + 'px');
 		pan();
 		document.body.classList.toggle('kb', open);
 		if (open && !landing) log.scrollTop = log.scrollHeight;
@@ -4476,17 +4705,7 @@ if (window.visualViewport) {
 }
 input.addEventListener('focus', () => setTimeout(() => { if (!landing) log.scrollTop = log.scrollHeight; }, 250));
 
-handshake().then(() => {
-	loadSessions(); browserNotice();
-	/* sent from the code landing: it opened this session, now it goes */
-	let held = null;
-	try { held = JSON.parse(sessionStorage.getItem('hako-send') || 'null'); } catch (e) {}
-	if (held && REMOTE_ID && held.id === REMOTE_ID && held.text) {
-		try { sessionStorage.removeItem('hako-send'); } catch (e) {}
-		wantSlide = true; setBusy(true);
-		post('/api/prompt', held.text);
-	}
-});
+handshake().then(() => { loadSessions(); browserNotice(); });
 renderChrome();
 window.hakoAccount.boot();
 </script>

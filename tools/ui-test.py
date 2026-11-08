@@ -43,12 +43,15 @@ st = json.load(urllib.request.urlopen(U + "/api/state"))
 ck(all(k in st for k in ("version", "dir", "provider")), f"/api/state has version/dir/provider ({st.get('version')}, {st.get('provider')})")
 with sync_playwright() as p:
     b = p.chromium.launch()
-    # a home-screen app on iOS 26: the screen is taller than what it paints
-    pg = b.new_page(viewport={'width': 390, 'height': 801}, has_touch=True)
-    pg.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true }); Object.defineProperty(screen, 'height', { get: () => 844 });")
+    # a home-screen app on iOS 26 (428x926): the window can claim the whole screen while fixed layers stop a status bar short
+    pg = b.new_page(viewport={'width': 428, 'height': 879}, has_touch=True)
+    pg.add_init_script("Object.defineProperty(navigator, 'standalone', { get: () => true }); Object.defineProperty(screen, 'height', { get: () => 926 }); Object.defineProperty(window, 'innerHeight', { get: () => 926 });")
     pg.goto(U); pg.wait_for_timeout(1000)
-    ck(pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--vh')") == '801px'
-       and pg.evaluate("document.body.classList.contains('app')"), "home-screen app: the page is as tall as what iOS paints, not the screen")
+    ck(pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--vh')") == '879px'
+       and pg.evaluate("document.body.classList.contains('app')"), "home-screen app: the page is as tall as a fixed layer reaches, whatever the window claims")
+    ck(pg.evaluate("""[...document.styleSheets].some((s) => [...s.cssRules].some((r) => r.media && r.media.mediaText.includes('display-mode: standalone')
+        && [...r.cssRules].some((c) => c.selectorText === 'html' && c.style.height === '100vh')))"""), "home-screen app: the root height is 100vh, not 100% or dvh")
+    ck('#probe' not in pg.content(), "the viewport probe is gone")
     ck(pg.evaluate("parseFloat(getComputedStyle(document.querySelector('header')).paddingTop)") >= 26, "home-screen app: the header clears the blur under the status bar")
     pg.close()
     for name, vp in (("desk", {'width': 1280, 'height': 800}), ("phone", {'width': 390, 'height': 844})):

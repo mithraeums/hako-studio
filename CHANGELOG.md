@@ -11,10 +11,18 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
 
 ### added
+- switching sessions no longer reloads the page: a code session, another one or chat opens in place, and the one left stays connected, so coming back is instant and its transcript is there
+- each code session open in a window keeps its own end-to-end session (a hako.wasm slot, up to 8), and the menu marks one out of sight that is asking you something, working, or finished since you looked
+- the session's mode pill offers auto from a linked device too; set that way it ends when remote turns off
 - account, your devices: everything bound to the account, with remove, and remove offline for the lot; a deleted home-screen app or cleared site data has no way to sign itself out
 
 ### fixed
 - a home-screen app on iOS 26: sheets' buttons and the composer were out of sight, the page was sized to the screen while iOS paints less; the header clears the blur under the status bar
+- a home-screen app on iOS 26 stopped a status bar short of the screen, which showed as a band under the menu: the root height is 100vh there, and the page never runs past where a fixed layer reaches
+- two windows of one browser no longer knock each other offline, reconnecting for good: one device key per browser, and each window opens its own stream on the relay, named by a tag
+- code lists live sessions only, one per `:remote on`: two hakos in one folder show as two, and the folder's past chats stay off a linked device
+- relay: a device holds up to 8 streams, each with a tag, and a frame goes to `<id>/<tag>` or to all of a device's streams; `/v1/devices` lists each device's open tags, in memory only
+- relay: a device keeps its newest 8 sign-in tokens, so a window signing in no longer ends another's
 - a full account no longer says "this browser is signed in to another account": the relay answers 507 and the page says the account is full
 
 ### added

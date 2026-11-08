@@ -89,6 +89,7 @@ static void seed_all(void) {
 	seed_req("POST", "/v1/auth/prove", NULL, "0123456789abcdef0123456789abcdef 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n", 0);
 	seed_req("GET", "/v1/devices", T0, "", 0);
 	seed_req("POST", "/v1/up", T0, "0123456789abcdef0123456789abcdef aGVsbG8\n0123456789abcdef0123456789abcdef d29ybGQ\n", 1);
+	seed_req("POST", "/v1/up?s=w1", T0, "0123456789abcdef0123456789abcdef/w2 aGVsbG8=\n0123456789abcdef0123456789abcdef/ d29ybGQ=\n", 1);
 	seed_req("POST", "/v1/webauthn/challenge", T0, "", 0);
 	seed_req("POST", "/v1/email/start", T1, "a@b.co\n", 0);
 	seed_req("POST", "/v1/email/verify", T0, "123456 -\n", 0);
@@ -148,11 +149,11 @@ static void snapshot(int restore) {
 static void dev_reset(Dev *d, int i, const char *tok, const char *acct) {
 	if (!d->used) pthread_mutex_init(&d->w, NULL);
 	d->used = 1;
-	d->down = -1;
+	for (int s = 0; s < DEV_STREAMS; s++) d->st[s].fd = -1;
 	memset(d->pub, i + 1, 32);
 	device_id(d->id, d->pub);
-	memcpy(d->token, tok, 65);
-	d->tok_exp = time(NULL) + 3600;
+	memcpy(d->token[0], tok, 65);
+	d->tok_exp[0] = time(NULL) + 3600;
 	snprintf(d->acct, sizeof d->acct, "%s", acct);
 	snprintf(d->wa_chal, sizeof d->wa_chal, "%s", CHAL);
 	d->wa_exp = time(NULL) + 600;
