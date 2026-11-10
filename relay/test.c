@@ -20,6 +20,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#define DEV_STREAMS_T 8                          /* relay.c DEV_STREAMS */
+#define DEV_TOKENS_T 8                           /* relay.c DEV_TOKENS */
 static int port = 18791, fails, fixed_ip;
 static unsigned ipn;
 static char dir[256], logp[300];
@@ -355,6 +357,36 @@ static int frame(Dev *a, Dev *b, char *got, size_t cap) {
 	return st;
 }
 
+
+/* ---- streams: several per device, each with a tag ---- */
+
+static int down_open(Dev *d, const char *tag) {
+	int fd = dial();
+	char req[300];
+	snprintf(req, sizeof req, "GET /v1/down%s%s HTTP/1.1\r\nAuthorization: Bearer %s\r\n\r\n", tag ? "?s=" : "", tag ? tag : "", d->token);
+	if (fd < 0 || write(fd, req, strlen(req)) < 0) return -1;
+	struct timeval tv = { 0, 300000 };
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	return fd;
+}
+
+/* what reached a stream in the last moment, keepalive newlines dropped; "" for a closed one */
+static void down_read(int fd, char *out, size_t cap) {
+	size_t o = 0;
+	char buf[4096];
+	ssize_t r;
+	usleep(120000);
+	while ((r = read(fd, buf, sizeof buf)) > 0)
+		for (ssize_t i = 0; i < r && o + 1 < cap; i++) if (buf[i] != '\n' || (o && out[o - 1] != '\n')) out[o++] = buf[i];
+	out[o] = '\0';
+}
+
+static int down_has(int fd, const char *what) {
+	static char got[8192];
+	down_read(fd, got, sizeof got);
+	return strstr(got, what) != NULL;
+}
+
 int main(int argc, char **argv) {
 	if (argc > 1) relay_bin = argv[1];
 	signal(SIGPIPE, SIG_IGN);
@@ -539,6 +571,83 @@ int main(int argc, char **argv) {
 	ck(!strcmp(got, "offline"), "a device with no account reaches nobody");
 	ck(http("GET", "/v1/devices", E.token, NULL, NULL, 0) == 403, "devices needs an account");
 
+
+	/* streams: windows and sessions on one device, each its own */
+	{
+		ck(dev_sign_in(&A) == 0 && dev_sign_in(&B) == 0 && !strcmp(A.acct, B.acct), "streams: two devices in one account");
+		/* each window signs in for itself: a second sign-in leaves the first token working */
+		Dev A2 = A;
+		ck(dev_sign_in(&A2) == 0 && strcmp(A2.token, A.token), "tokens: a second window of the device signs in");
+		ck(http("GET", "/v1/devices", A.token, NULL, NULL, 0) == 200, "tokens: and the first window's token still works");
+		{
+			Dev X = A;
+			char first[65];
+			snprintf(first, sizeof first, "%s", A2.token);
+			for (int i = 0; i < DEV_TOKENS_T; i++) dev_sign_in(&X);
+			ck(http("GET", "/v1/devices", first, NULL, NULL, 0) == 401, "tokens: the oldest gives way once all are taken");
+			ck(http("GET", "/v1/devices", X.token, NULL, NULL, 0) == 200, "tokens: the newest works");
+			A = X;
+		}
+		int w1 = down_open(&A, "w1"), w2 = down_open(&A, "w2"), old = down_open(&A, NULL), c1 = down_open(&B, "c1");
+		usleep(150000);
+		char body[128], hdr[64];
+		down_read(w1, out, sizeof out); down_read(w2, out, sizeof out); down_read(old, out, sizeof out); down_read(c1, out, sizeof out);
+		snprintf(body, sizeof body, "%s/w1 b25l\n", A.id);
+		ck(http("POST", "/v1/up?s=c1", B.token, body, out, sizeof out) == 200 && !strncmp(out, "ok 1 0", 6), "streams: a frame to one tag is taken");
+		snprintf(hdr, sizeof hdr, "%s/c1 b25l", B.id);
+		ck(down_has(w1, hdr), "streams: it reaches that stream, from the sender's tag");
+		ck(!down_has(w2, "b25l"), "streams: and not another window");
+		ck(!down_has(old, "b25l"), "streams: nor the untagged stream");
+		snprintf(body, sizeof body, "%s YWxs\n", A.id);
+		http("POST", "/v1/up", B.token, body, NULL, 0);
+		snprintf(hdr, sizeof hdr, "%s YWxs", B.id);
+		int all = down_has(w1, hdr), all2 = down_has(w2, hdr), all3 = down_has(old, hdr);
+		ck(all && all2 && all3, "streams: a frame to the device reaches every stream, from no tag");
+		ck(http("GET", "/v1/devices", A.token, NULL, out, sizeof out) == 200, "streams: devices");
+		{
+			char *row = strstr(out, A.id);
+			char *eol = row ? strchr(row, '\n') : NULL;
+			if (eol) *eol = '\0';
+			char *last = row ? strrchr(row, ' ') : NULL;
+			int has_dot = 0;
+			for (char *t = last ? last + 1 : NULL; t && *t; t += strcspn(t, ",") + (t[strcspn(t, ",")] ? 1 : 0))
+				if (t[0] == '.' && (t[1] == ',' || !t[1])) has_dot = 1;
+			ck(last && strstr(last, "w1") && strstr(last, "w2") && has_dot,
+			   "streams: devices lists each open stream's tag, '.' for an untagged one");
+		}
+		int w1b = down_open(&A, "w1");
+		usleep(150000);
+		down_read(w1b, out, sizeof out);
+		snprintf(body, sizeof body, "%s/w1 YWdhaW4=\n", A.id);
+		http("POST", "/v1/up?s=c1", B.token, body, NULL, 0);
+		ck(down_has(w1b, "YWdhaW4"), "streams: the same tag again takes its own place");
+		down_read(w1, out, sizeof out);
+		ck(!strstr(out, "YWdhaW4"), "streams: the stream it replaced gets nothing");
+		snprintf(body, sizeof body, "%s/w2 dHdv\n", A.id);
+		http("POST", "/v1/up?s=c1", B.token, body, NULL, 0);
+		ck(down_has(w2, "dHdv"), "streams: and the other window is still open");
+		snprintf(body, sizeof body, "%s/zz bm9uZQ==\n", A.id);
+		http("POST", "/v1/up?s=c1", B.token, body, NULL, 0);
+		snprintf(hdr, sizeof hdr, "! offline %s/zz", A.id);
+		ck(down_has(c1, hdr), "streams: a tag with no stream is offline, told to the sender's own stream");
+		ck(http("GET", "/v1/down?s=Bad!", A.token, NULL, NULL, 0) == 400, "streams: a bad tag is refused");
+		ck(http("GET", "/v1/down?s=0123456789abc", A.token, NULL, NULL, 0) == 400, "streams: a tag past 12 is refused");
+		ck(http("POST", "/v1/up?s=", B.token, "", NULL, 0) == 400, "streams: an empty tag is refused");
+		snprintf(body, sizeof body, "%s/ eA\n%s/a-b eA\n%s/ab\n", A.id, A.id, A.id);
+		ck(http("POST", "/v1/up?s=c1", B.token, body, out, sizeof out) == 200 && !strncmp(out, "ok 0 3", 6), "streams: a frame with a bad tag is dropped");
+		/* the oldest gives way when all are taken */
+		int more[DEV_STREAMS_T];
+		for (int i = 0; i < DEV_STREAMS_T; i++) { char t[8]; snprintf(t, sizeof t, "m%d", i); more[i] = down_open(&A, t); usleep(30000); }
+		usleep(150000);
+		snprintf(body, sizeof body, "%s/m%d bGFzdA==\n", A.id, DEV_STREAMS_T - 1);
+		http("POST", "/v1/up?s=c1", B.token, body, NULL, 0);
+		ck(down_has(more[DEV_STREAMS_T - 1], "bGFzdA"), "streams: a ninth stream opens");
+		snprintf(body, sizeof body, "%s/w2 Z29uZQ==\n", A.id);
+		http("POST", "/v1/up?s=c1", B.token, body, NULL, 0);
+		ck(!down_has(w2, "Z29uZQ"), "streams: and the oldest gave way");
+		for (int i = 0; i < DEV_STREAMS_T; i++) close(more[i]);
+		close(w1); close(w2); close(w1b); close(old); close(c1);
+	}
 	/* devices, bind, revoke */
 	ck(http("GET", "/v1/devices", A.token, NULL, out, sizeof out) == 200 && strstr(out, A.id) && strstr(out, B.id) && !strstr(out, C.id),
 	   "devices lists this account's devices only");
@@ -549,8 +658,11 @@ int main(int argc, char **argv) {
 	ck(http("POST", "/v1/name", E.token, "c2VhbGVkLW5hbWU", NULL, 0) == 200, "set a sealed name");
 	ck(http("GET", "/v1/devices", A.token, NULL, out, sizeof out) == 200 && strstr(out, "c2VhbGVkLW5hbWU"), "the sealed name lists");
 	ck(http("POST", "/v1/revoke", C.token, B.id, NULL, 0) == 404, "another account cannot revoke");
+	Dev B2 = B;
+	ck(dev_sign_in(&B2) == 0, "a second window of the device to revoke");
 	ck(http("POST", "/v1/revoke", A.token, B.id, NULL, 0) == 200, "revoke");
 	ck(http("GET", "/v1/devices", B.token, NULL, NULL, 0) == 401, "the revoked token is dead");
+	ck(http("GET", "/v1/devices", B2.token, NULL, NULL, 0) == 401, "and so is every other token it had");
 	ck(dev_sign_in(&B) == 0 && !B.acct[0], "and the device has no account");
 
 	/* the per-IP sign-in limit */

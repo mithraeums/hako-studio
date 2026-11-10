@@ -183,7 +183,7 @@ with sync_playwright() as p:
        "page: in code, files stays inside the folder (no open another); the menu says code (%r)" % fh)
     pg.locator('.modal button:has-text("close")').last.click(); pg.wait_for_timeout(300)
     ck("proj" in pg.inner_text('#project-list'), "page: the menu lists the project (the shared folder)")
-    ck(pg.locator('#here').is_visible(), "page: in a session, the folder's own chats show too")
+    ck(pg.locator('#here').is_hidden(), "page: in a session, only that live session shows, not the folder's past chats")
     nest = pg.evaluate("""(() => {
         const f = document.querySelector('#project-list .sess.cur'), bg = f && getComputedStyle(f).backgroundColor;
         return [!!f && f.nextElementSibling === document.getElementById('here'), bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'];
@@ -263,6 +263,147 @@ with sync_playwright() as p:
     ck("not from a remote device" in pg.inner_text('#log'), "page: :auto is refused from a remote device")
     ck(not pg.locator('.thinking').count() and pg.inner_text('#send').strip() == 'send',
        "page: and the refusal is the whole answer, no thinking after it (%d)" % pg.locator('.thinking').count())
+    pg.fill('#input', ':mode auto'); pg.click('#send')
+    ck(until(rb"until remote turns off", 8) is not None, "desktop: auto set from a device says so, and for how long")
+    pg.wait_for_timeout(1000)
+    pills = "[...document.querySelectorAll('.pill')].map((x) => x.textContent).join(' ')"
+    ck('auto' in pg.evaluate(pills), "page: the mode pill says auto while it holds (%r)" % pg.evaluate(pills))
+    pg.fill('#input', ':mode ask'); pg.click('#send')
+    pg.wait_for_timeout(1000)
+    ck('ask' in pg.evaluate(pills), "page: and ask again after")
+    # two windows of one browser on one session: each keeps its stream, neither knocks the other off
+    retries = "window.__retries = 0; window.addEventListener('hako-remote-retry', () => window.__retries++);"
+    pg.evaluate(retries)
+    pg2 = pg.context.new_page()
+    pg2.add_init_script(retries)
+    pg2.goto(pg.url); pg2.wait_for_timeout(9000)
+    ck(pg.evaluate("window.__retries") == 0 and pg2.evaluate("window.__retries") == 0,
+       "two windows: neither is reconnecting (%d, %d)" % (pg.evaluate("window.__retries"), pg2.evaluate("window.__retries")))
+    ck('reconnecting' not in pg.inner_text('#meta') and 'reconnecting' not in pg2.inner_text('#meta'), "two windows: neither says reconnecting")
+    pg2.fill('#input', 'hello from window two'); pg2.click('#send')
+    pg2.wait_for_timeout(3000)
+    ck('hello from window two' in pg2.inner_text('#log'), "two windows: the second can send")
+    ck('hello from window two' in pg.inner_text('#log'), "two windows: the first sees it")
+    ck(pg.evaluate("relay.tag") != pg2.evaluate("relay.tag") and pg.evaluate("relay.id") == pg2.evaluate("relay.id"),
+       "two windows: one device key, each window its own stream")
+    ck(pg.evaluate("(async () => (await kvGet('device-1')) ? 1 : 0)()") == 0, "two windows: no second device key minted")
+    pg2.close(); pg.wait_for_timeout(500)
+    # a second folder shared from the same computer: the page switches between the two,
+    # and to chat, without a reload, and the session left stays connected
+    PROJ2 = os.path.realpath(W) + "/proj2"; os.makedirs(PROJ2)
+    s2 = HOME + "/.hako/projects/" + PROJ2.replace("/", "-"); os.makedirs(s2)
+    open(s2 + "/trust", "w").write("granted=%d\n" % int(time.time()))
+    pid2, fd2 = pty.fork()
+    if pid2 == 0:
+        os.chdir(PROJ2)
+        os.execve(HAKO, [HAKO], dict(os.environ, HOME=HOME, HAKO_HAKM=FAKE, TERM="xterm-256color",
+                  HAKO_RELAY_URL="http://127.0.0.1:%d" % RP, HAKO_STUDIO_URL=STUDIO, HAKO_NO_BROWSER="1"))
+    fcntl.ioctl(fd2, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 400, 0, 0))
+    atexit.register(lambda: os.kill(pid2, signal.SIGKILL))
+    seen2 = [b""]
+    def reader2():
+        while True:
+            r, _, _ = select.select([fd2], [], [], 0.2)
+            if r:
+                try: seen2[0] += os.read(fd2, 65536)
+                except OSError: return
+    threading.Thread(target=reader2, daemon=True).start()
+    time.sleep(2.0); os.write(fd2, b":remote on 8798\r"); time.sleep(3.0)
+    CAR = "(typeof carriers === 'object' ? carriers : { size: 0, get: () => ({ ready: Symbol() }) })"   # an older page has none: its checks fail, not crash
+    att = lambda sid: pg.evaluate("(document.querySelector('#project-list .sess[data-code=\"%s\"]') || { dataset: {} }).dataset.att || ''" % sid)
+    def pick(name):      # the menu row by its folder name, as a tap on it
+        pg.evaluate("""(n) => { const b = [...document.querySelectorAll('#project-list > .sess')]
+            .find((x) => (x.querySelector('.nm') || {}).textContent === n); if (b) b.click(); }""", name)
+    def att_is(sid, want):
+        for _ in range(75):
+            if att(sid) == want: return True
+            pg.wait_for_timeout(200)
+        return False
+    A = pg.evaluate("REMOTE_ID")
+    pg.evaluate("window.__kept = 1; window.__readyA = " + CAR + ".get(REMOTE_ID).ready")
+    pg.evaluate("window.hakoAccount.show(true)")
+    try: pg.wait_for_function("document.querySelectorAll('#project-list > .sess').length === 2", timeout=10000)
+    except Exception: pass
+    ck(pg.locator('#project-list > .sess').count() == 2, "switch: both folders show under code")
+    pick("proj2")
+    try: pg.wait_for_function("REMOTE_ID && REMOTE_ID !== %r && location.hash === '#remote=' + REMOTE_ID" % A, timeout=8000)
+    except Exception: pass
+    pg.wait_for_timeout(2500); pg.wait_for_load_state()
+    B = pg.evaluate("REMOTE_ID")
+    ck(pg.evaluate("window.__kept") == 1 and B and B != A, "switch: another session opens without a reload")
+    ck(pg.evaluate("state.dir").endswith("/proj2") and "hey from the relay" not in pg.inner_text('#log'),
+       "switch: the page shows the other folder, not the first one's chat (%r)" % pg.evaluate("state.dir"))
+    ck(pg.evaluate(CAR + ".size") == 2 and pg.evaluate(CAR + ".get(%r).ready === window.__readyA" % A),
+       "switch: the first session stays connected (no new handshake)")
+    pg.fill('#input', 'hey from the second folder'); pg.click('#send')
+    try:
+        pg.wait_for_selector('.turn.model', timeout=20000); pg.wait_for_timeout(1000)
+        ck(b"hey from the second folder" in seen2[0] and not until(rb"hey from the second folder", 1),
+           "switch: a turn goes to the folder shown, not the other one")
+    except Exception as e:
+        ck(False, "switch: a turn goes to the folder shown (%s)" % str(e)[:60])
+    # the first one asks while out of sight: its row says so
+    os.write(fd, b"TOOL please\r")
+    ck(att_is(A, 'ask'), "switch: a session out of sight that asks something is marked in the menu")
+    pick("proj"); pg.wait_for_load_state()
+    try:
+        pg.click('.ask:not(.settled) button.primary', timeout=10000)
+        pg.wait_for_timeout(2500)
+        ck("worked for" in pg.inner_text('#log').split('TOOL please')[-1], "switch: back on it, the ask is there and answered from here")
+    except Exception as e:
+        ck(False, "switch: back on it, the ask is there and answered from here (%s)" % str(e)[:60])
+    ck(pg.evaluate("window.__kept") == 1 and pg.evaluate(CAR + ".get(REMOTE_ID).ready === window.__readyA"),
+       "switch: and back again, still the same page and the same connection")
+    # the second one finishes while out of sight
+    os.write(fd2, b"hello there\r")
+    ck(att_is(B, 'fresh'), "switch: a session out of sight that finished a turn is marked in the menu")
+    pg.click('#mode-chat'); pg.wait_for_timeout(2500); pg.wait_for_load_state()
+    ck(pg.evaluate("window.__kept") == 1 and pg.evaluate("REMOTE_ID") == "" and pg.evaluate("location.hash") == ""
+       and pg.evaluate(CAR + ".size") == 2 and pg.evaluate("typeof localApi !== 'undefined' && !!localApi"),
+       "switch: chat is this browser's own, no reload, both code sessions still open")
+    pick("proj"); pg.wait_for_timeout(2500); pg.wait_for_load_state()
+    ck(pg.evaluate("REMOTE_ID") == A and "hey from the relay" in pg.inner_text('#log') and pg.evaluate(CAR + ".get(REMOTE_ID).ready === window.__readyA"),
+       "switch: and from chat back to the first, its chat replayed, the same connection")
+    n0 = pg.locator('.turn.model').count()
+    pg.fill('#input', 'still there after all that'); pg.click('#send')
+    try: pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % n0, timeout=20000)
+    except Exception: pass
+    ck(pg.locator('.turn.model').count() > n0 and until(rb"still there after all that", 3) is not None,
+       "switch: and a turn there still works, both ways")
+    # a second hako joins the shared folder's chat: the page lists both, @ completes the
+    # other, and a line for it is answered there and shows here
+    pid3, fd3 = pty.fork()
+    if pid3 == 0:
+        os.chdir(PROJ)
+        os.execve(HAKO, [HAKO], dict(os.environ, HOME=HOME, HAKO_HAKM=FAKE, TERM="xterm-256color",
+                  HAKO_RELAY_URL="http://127.0.0.1:%d" % RP, HAKO_STUDIO_URL=STUDIO, HAKO_NO_BROWSER="1"))
+    fcntl.ioctl(fd3, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 400, 0, 0))
+    atexit.register(lambda: os.kill(pid3, signal.SIGKILL))
+    seen3 = [b""]
+    def reader3():
+        while True:
+            r, _, _ = select.select([fd3], [], [], 0.2)
+            if r:
+                try: seen3[0] += os.read(fd3, 65536)
+                except OSError: return
+    threading.Thread(target=reader3, daemon=True).start()
+    time.sleep(2.0); os.write(fd3, b"\r"); time.sleep(1.5)        # its own chat at first; then join
+    ck(b"starts its own" in seen3[0], "agents: a second hako in the shared folder starts its own chat")
+    os.write(fd3, b":join\r"); time.sleep(1.5)
+    pg.evaluate("typeof loadAgents === 'function' && loadAgents(true)"); pg.wait_for_timeout(1500)
+    ck("2 hakos" in pg.evaluate(pills), "agents: once it joins, the page says two hakos are on the session (%r)" % pg.evaluate(pills))
+    pg.fill('#input', '@'); pg.dispatch_event('#input', 'input'); pg.wait_for_timeout(1200)
+    ck(pg.locator('#cmdmenu .cmd .n').all_inner_texts() == ['@sho2'], "agents: @ completes the other hako, and only it (%r)" % pg.locator('#cmdmenu .cmd .n').all_inner_texts())
+    pg.fill('#input', '@sho2 TELL from the page'); pg.click('#send')
+    try: pg.wait_for_function("document.getElementById('log').innerText.includes('sho2: Okay')", timeout=25000)
+    except Exception: pass
+    ck(b"[from sho] TELL from the page" in seen3[0] and "sho2: Okay" in pg.inner_text('#log'),
+       "agents: @sho2 from the page runs on the other hako, and its answer shows here")
+    os.write(fd3, b":q\r"); time.sleep(1.0)
+    os.write(fd2, b":remote off\r"); time.sleep(2.0)
+    pg.evaluate("window.hakoAccount.show(true)"); pg.wait_for_timeout(1500)
+    ck(pg.evaluate(CAR + ".size") == 1 and pg.evaluate(CAR + ".has(%r)" % A),
+       "switch: a session gone :remote off lets go of its place here (%d)" % pg.evaluate(CAR + ".size"))
     remote_url = pg.url
     # the same session from Safari's engine: Chromium (signed in) binds a WebKit
     # device to the account, which leaves it signed in without K (as an email or
@@ -290,7 +431,7 @@ with sync_playwright() as p:
         except Exception: pass
         ck(wp.evaluate("(async () => hex(await kvGet('k') || new Uint8Array(0)))()") == K and '#pair=' not in wp.url,
            "webkit: the code hands this browser the account key, and leaves the address bar")
-        ck(wp.url.endswith('#remote=' + base64.urlsafe_b64decode(pm.group(2) + b'==').hex()), "webkit: and opens that session (%s)" % wp.url[-50:])
+        ck(('#remote=' + base64.urlsafe_b64decode(pm.group(2) + b'==').hex() + '/') in wp.url, "webkit: and opens that session, by its stream (%s)" % wp.url[-50:])
         ck(until(rb"remote: paired") is not None, "desktop: says a browser was paired")
         mark = len(seen)
         os.write(fd, b":remote\r"); time.sleep(4)
@@ -309,7 +450,7 @@ with sync_playwright() as p:
         print("\n".join(wp.evaluate("window.hakoLog || []")[-40:]))
         print("WK meta:", wp.inner_text('#meta'), "| modals:", [m.inner_text()[:120] for m in wp.locator('.modal').all()])
         print("WK log:", wp.inner_text('#log')[-400:].replace("\n", " / "))
-        print("WK state:", wp.evaluate("(async () => { try { await remote.ready; return 'ready'; } catch (e) { return 'err ' + e.message; } })()"))
+        print("WK state:", wp.evaluate("(async () => { try { await carriers.get(REMOTE_ID).ready; return 'ready'; } catch (e) { return 'err ' + e.message; } })()"))
         print("WK fetch:", wp.evaluate("(async () => { try { const r = await Promise.race([fetch('/api/state'), new Promise((_, j) => setTimeout(() => j(new Error('timeout 6s')), 6000))]); return r.status + ' ' + (await r.text()).slice(0, 80); } catch (e) { return 'err ' + e.message + ' ' + (e.stack || '').slice(0, 300); } })()"))
     wp.fill('#input', 'SLOW from safari'); wp.click('#send'); wp.wait_for_timeout(2500)
     ck("SLOW from safari" in wp.inner_text('#log') and wp.inner_text('#send').strip() == 'stop',
@@ -523,14 +664,15 @@ with sync_playwright() as p:
         ck(True, "page: after coming back, a turn answers")
     except Exception as e:
         ck(False, "page: after coming back, a turn answers (%s)" % str(e)[:60])
-    # the relay replaced the page's token (this device signed in somewhere else): the stream
+    # the page's token is gone (eight newer sign-ins of this device pushed it out): the stream
     # drops, the reconnect gets a 401, signs in again and comes back
     emark = len(errs)
     stale = pg.evaluate("""(async () => { const old = relay.token, at = relay.at;
-        relay.forget(); await relay.signIn(); const fresh = relay.token;
+        for (let i = 0; i < 8; i++) { relay.forget(); await relay.signIn(); }
+        const fresh = relay.token;
         Object.assign(relay, { token: old, at }); relay.keep(Object.assign(relay.kept(), { token: old }));
         const c = new AbortController();
-        fetch(RELAY_URL + '/v1/down', { headers: { Authorization: 'Bearer ' + fresh }, signal: c.signal })
+        fetch(RELAY_URL + '/v1/down?s=' + relay.tag, { headers: { Authorization: 'Bearer ' + fresh }, signal: c.signal })
             .then(() => setTimeout(() => c.abort(), 300), () => {});
         return old; })()""")
     pg.wait_for_timeout(8000)

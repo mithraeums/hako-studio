@@ -11,8 +11,12 @@
  *   POST /v1/auth/prove       <challenge> <mac hex>    -> <token> <device id> <account|->
  *   GET  /v1/health
  * with a device token (Bearer):
- *   GET  /v1/down             frames for this device, one per line
- *   POST /v1/up               lines "<to id> <base64>", streamed or not; same account only
+ *   GET  /v1/down[?s=<tag>]   frames for this device, one per line
+ *   POST /v1/up[?s=<tag>]     lines "<to id>[/<tag>] <base64>", streamed or not; same account only
+ * A device holds up to DEV_STREAMS streams at once, each with its own tag: a browser
+ * window, a hako session. A frame to "<id>/<tag>" goes to that stream, a frame to
+ * "<id>" to every stream the device has (and to the one untagged stream old
+ * clients open), and a frame arrives from "<id>/<tag>" when its sender named one.
  *   POST /v1/webauthn/challenge                        -> <challenge b64url>
  *   POST /v1/passkey/register <invite|-> <cred> <clientData> <authData> <spki>  -> <account>
  *   POST /v1/passkey/login    <cred> <clientData> <authData> <signature>       -> <account> <wrapped|->
@@ -80,6 +84,9 @@
 #define MAX_BIND   2048
 #define MAX_SPENT  4096
 #define DEV_PER_ACCT 32
+#define DEV_STREAMS 8
+#define DEV_TOKENS 8
+#define TAG_MAX    12                           /* [0-9a-z], random per window or session */
 #define MAILS_PER_MIN 20                        /* all addresses together */
 
 #ifndef MSG_NOSIGNAL
@@ -90,10 +97,11 @@ typedef struct {
 	int used;
 	char id[33];
 	unsigned char pub[32];
-	char token[65];
-	time_t tok_exp, seen;
-	int down;                  /* the open /v1/down socket, or -1 */
-	pthread_mutex_t w;         /* guards down and every write to it */
+	char token[DEV_TOKENS][65];  /* each window or session signs in for itself: the newest few all work */
+	time_t tok_exp[DEV_TOKENS], seen;
+	int tok_next;              /* where the next token goes, round the ring */
+	struct { int fd; char tag[TAG_MAX + 1]; time_t since; } st[DEV_STREAMS];   /* open /v1/down sockets, fd -1 when free */
+	pthread_mutex_t w;         /* guards st and every write to it */
 	double bucket;
 	struct timeval bucket_t;
 	char acct[17];             /* the account it is bound to, or "" */
@@ -596,7 +604,8 @@ static Dev *dev_by_token(const char *req) {
 	Dev *hit = NULL;
 	pthread_mutex_lock(&dlock);
 	for (int i = 0; i < MAX_DEV; i++)
-		if (devs[i].used && devs[i].tok_exp > now && CRYPTO_memcmp(devs[i].token, a, 64) == 0) hit = &devs[i];
+		for (int k = 0; k < DEV_TOKENS && devs[i].used; k++)
+			if (devs[i].tok_exp[k] > now && CRYPTO_memcmp(devs[i].token[k], a, 64) == 0) hit = &devs[i];
 	if (hit) hit->seen = now;
 	pthread_mutex_unlock(&dlock);
 	return hit;
@@ -608,6 +617,40 @@ static Dev *dev_by_id(const char *id) {
 	for (int i = 0; i < MAX_DEV && !hit; i++) if (devs[i].used && !strcmp(devs[i].id, id)) hit = &devs[i];
 	pthread_mutex_unlock(&dlock);
 	return hit;
+}
+
+/* How many streams a device has open. */
+static int dev_streams(Dev *d) {
+	int n = 0;
+	for (int s = 0; s < DEV_STREAMS; s++) n += d->st[s].fd >= 0;
+	return n;
+}
+
+/* How many of a device's tokens are still live. */
+static int dev_tokens(Dev *d, time_t now) {
+	int n = 0;
+	for (int k = 0; k < DEV_TOKENS; k++) n += d->tok_exp[k] > now;
+	return n;
+}
+
+/* A stream tag: none, or 1 to TAG_MAX of [0-9a-z]. -1 for anything else. */
+static int tag_ok(const char *t, size_t n) {
+	if (n > TAG_MAX) return -1;
+	for (size_t i = 0; i < n; i++) if (!((t[i] >= '0' && t[i] <= '9') || (t[i] >= 'a' && t[i] <= 'z'))) return -1;
+	return 0;
+}
+
+/* The tag in "?s=<tag>" right after a route, into out. p points just past the route name. */
+static int query_tag(const char *p, char out[TAG_MAX + 1]) {
+	out[0] = '\0';
+	if (*p == ' ') return 0;
+	if (strncmp(p, "?s=", 3)) return -1;
+	p += 3;
+	size_t n = strcspn(p, " ");
+	if (!n || tag_ok(p, n)) return -1;
+	memcpy(out, p, n);
+	out[n] = '\0';
+	return 0;
 }
 
 /* The device's slot, made if new. When full, the longest-idle slot with no
@@ -626,12 +669,12 @@ static Dev *dev_upsert(const unsigned char pub[32]) {
 	if (!hit && !spare) {
 		for (int i = 0; i < MAX_DEV; i++) {
 			Dev *d = &devs[i];
-			if (d->down < 0 && d->tok_exp < now && now - d->seen > 7200 && (!spare || d->seen < spare->seen)) spare = d;
+			if (!dev_streams(d) && !dev_tokens(d, now) && now - d->seen > 7200 && (!spare || d->seen < spare->seen)) spare = d;
 		}
 	}
 	if (!hit && spare) {
 		hit = spare;
-		if (!hit->used) { pthread_mutex_init(&hit->w, NULL); hit->down = -1; }
+		if (!hit->used) { pthread_mutex_init(&hit->w, NULL); for (int s = 0; s < DEV_STREAMS; s++) hit->st[s].fd = -1; }
 		hit->used = 1;
 		memcpy(hit->id, id, 33);
 		memcpy(hit->pub, pub, 32);
@@ -675,13 +718,15 @@ static int ip_allow(const char *ip) {
 	return ok;
 }
 
-/* Write one line to a device's stream, or report that it has none. */
-static int dev_deliver(Dev *d, const char *line, size_t n) {
+/* Write one line to the device's stream with this tag, or to all of its streams
+   when tag is NULL. The number it reached. */
+static int dev_deliver(Dev *d, const char *tag, const char *line, size_t n) {
+	int hit = 0;
 	pthread_mutex_lock(&d->w);
-	int fd = d->down;
-	if (fd >= 0) send_all(fd, line, n);
+	for (int s = 0; s < DEV_STREAMS; s++)
+		if (d->st[s].fd >= 0 && (!tag || !strcmp(d->st[s].tag, tag))) { send_all(d->st[s].fd, line, n); hit++; }
 	pthread_mutex_unlock(&d->w);
-	return fd >= 0;
+	return hit;
 }
 
 /* ---- routes ---- */
@@ -758,10 +803,12 @@ static void route_prove(int fd, Body *b, const char *ip) {
 	bind_acct(pubhex, acct);
 	if (RAND_bytes(t, 32) != 1) { reply(fd, "503 Service Unavailable", "no entropy\n"); return; }
 	pthread_mutex_lock(&dlock);
-	hex_enc(d->token, t, 32);
-	d->tok_exp = now + TOKEN_LIFE;
+	int slot = d->tok_next++ % DEV_TOKENS;       /* a new token takes the place of the oldest */
+	d->tok_next %= DEV_TOKENS;
+	hex_enc(d->token[slot], t, 32);
+	d->tok_exp[slot] = now + TOKEN_LIFE;
 	memcpy(d->acct, acct, 17);
-	snprintf(out, sizeof out, "%s %s %s\n", d->token, d->id, acct[0] ? acct : "-");
+	snprintf(out, sizeof out, "%s %s %s\n", d->token[slot], d->id, acct[0] ? acct : "-");
 	pthread_mutex_unlock(&dlock);
 	OPENSSL_cleanse(t, sizeof t);
 	reply(fd, "200 OK", out);
@@ -769,7 +816,7 @@ static void route_prove(int fd, Body *b, const char *ip) {
 
 /* Holds the socket open; frames arrive from other connections' threads. A
    newer stream for the same device replaces this one. */
-static void route_down(int fd, Dev *d) {
+static void route_down(int fd, Dev *d, const char *tag) {
 	char head[640];
 	/* nosniff: Safari otherwise holds back the first few hundred bytes of a
 	   text/plain stream to guess its type, and the first replies sit there */
@@ -778,8 +825,19 @@ static void route_down(int fd, Dev *d) {
 	struct timeval tv = { 10, 0 };
 	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
 	pthread_mutex_lock(&d->w);
-	if (d->down >= 0) shutdown(d->down, SHUT_RDWR);
-	d->down = fd;
+	/* the same tag again is that window or session reconnecting: it takes its own place.
+	   A new one takes a free place, or the oldest */
+	int at = -1;
+	for (int s = 0; s < DEV_STREAMS && at < 0; s++) if (d->st[s].fd >= 0 && !strcmp(d->st[s].tag, tag)) at = s;
+	for (int s = 0; s < DEV_STREAMS && at < 0; s++) if (d->st[s].fd < 0) at = s;
+	if (at < 0) {
+		at = 0;
+		for (int s = 1; s < DEV_STREAMS; s++) if (d->st[s].since < d->st[at].since) at = s;
+	}
+	if (d->st[at].fd >= 0) shutdown(d->st[at].fd, SHUT_RDWR);
+	d->st[at].fd = fd;
+	snprintf(d->st[at].tag, sizeof d->st[at].tag, "%s", tag);
+	d->st[at].since = time(NULL);
 	send_all(fd, head, strlen(head));
 	/* Safari resolves the fetch only once body bytes arrive (and buffers the
 	   first few hundred): a burst of keepalives now, so it opens at once */
@@ -797,17 +855,17 @@ static void route_down(int fd, Dev *d) {
 			continue;
 		}
 		pthread_mutex_lock(&d->w);
-		int mine = d->down == fd;
+		int mine = d->st[at].fd == fd;
 		if (mine) send_all(fd, "\n", 1);
 		pthread_mutex_unlock(&d->w);
 		if (!mine) break;
 	}
 	pthread_mutex_lock(&d->w);
-	if (d->down == fd) d->down = -1;
+	if (d->st[at].fd == fd) d->st[at].fd = -1;
 	pthread_mutex_unlock(&d->w);
 }
 
-static void route_up(int fd, Body *b, Dev *from) {
+static void route_up(int fd, Body *b, Dev *from, const char *ftag) {
 	char *line = malloc(MAX_LINE), *out = malloc(MAX_LINE);
 	if (!line || !out) { free(line); free(out); reply(fd, "503 Service Unavailable", "memory\n"); return; }
 	struct timeval tv = { UP_IDLE_S, 0 };
@@ -815,27 +873,34 @@ static void route_up(int fd, Body *b, Dev *from) {
 	long n, frames = 0, bad = 0;
 	while ((n = body_line(b, line, MAX_LINE)) != -1) {
 		if (n == 0) continue;                                        /* keepalive */
-		char *sp = n > 33 ? line + 32 : NULL;
-		if (n == -2 || !sp || *sp != ' ' || !is_hex(line, 32) || !is_b64(sp + 1, (size_t)(n - 33))) { bad++; continue; }
+		if (n == -2 || n < 34 || !is_hex(line, 32)) { bad++; continue; }
+		char *tag = NULL, *sp = line + 32;
+		if (*sp == '/') {
+			tag = sp + 1;
+			sp = memchr(tag, ' ', (size_t)(n - 33));
+			if (!sp || sp == tag || tag_ok(tag, (size_t)(sp - tag))) { bad++; continue; }
+		}
+		if (*sp != ' ' || !is_b64(sp + 1, (size_t)(n - (sp + 1 - line)))) { bad++; continue; }
 		if (!dev_spend(from, (size_t)n)) { bad++; continue; }
 		*sp = '\0';
+		if (tag) tag[-1] = '\0';
 		Dev *to = dev_by_id(line);
 		if (to) {                                                    /* one account, or not at all */
 			pthread_mutex_lock(&dlock);
 			if (!from->acct[0] || strcmp(from->acct, to->acct)) to = NULL;
 			pthread_mutex_unlock(&dlock);
 		}
-		int m = snprintf(out, MAX_LINE, "%s %s\n", from->id, sp + 1);
-		int ok = to && dev_deliver(to, out, (size_t)m);
+		int m = snprintf(out, MAX_LINE, "%s%s%s %s\n", from->id, ftag[0] ? "/" : "", ftag, sp + 1);
+		int ok = to && dev_deliver(to, tag, out, (size_t)m) > 0;
 		if (verbose) {
 			struct timeval tv;
 			gettimeofday(&tv, NULL);
-			fprintf(stderr, "relay: %ld.%03d frame %.8s -> %.8s %zu %s\n", (long)tv.tv_sec % 1000, (int)(tv.tv_usec / 1000),
-			        from->id, line, (size_t)n, ok ? "delivered" : "offline");
+			fprintf(stderr, "relay: %ld.%03d frame %.8s/%s -> %.8s/%s %zu %s\n", (long)tv.tv_sec % 1000, (int)(tv.tv_usec / 1000),
+			        from->id, ftag, line, tag ? tag : "*", (size_t)n, ok ? "delivered" : "offline");
 		}
 		if (!ok) {
-			m = snprintf(out, MAX_LINE, "! offline %s\n", line);
-			dev_deliver(from, out, (size_t)m);
+			m = snprintf(out, MAX_LINE, "! offline %s%s%s\n", line, tag ? "/" : "", tag ? tag : "");
+			dev_deliver(from, ftag, out, (size_t)m);
 		}
 		frames++;
 	}
@@ -1413,12 +1478,20 @@ static void route_devices(int fd, const char *acct) {
 	for (int i = 0; i < n; i++) {
 		unsigned char pub[32];
 		char id[33];
-		int online = 0;
+		char tags[DEV_STREAMS * (TAG_MAX + 1) + 2] = "";
+		size_t tl = 0;
 		hex_dec(pub, pubs[i], 32);
 		device_id(id, pub);
 		Dev *x = dev_by_id(id);
-		if (x) { pthread_mutex_lock(&x->w); online = x->down >= 0; pthread_mutex_unlock(&x->w); }
-		o += (size_t)snprintf(out + o, 400, "%s %s %d %s\n", id, pubs[i], online, names[i][0] ? names[i] : "-");
+		if (x) {
+			pthread_mutex_lock(&x->w);
+			for (int s = 0; s < DEV_STREAMS; s++)
+				if (x->st[s].fd >= 0)
+					tl += (size_t)snprintf(tags + tl, sizeof tags - tl, "%s%s", tl ? "," : "", x->st[s].tag[0] ? x->st[s].tag : ".");
+			pthread_mutex_unlock(&x->w);
+		}
+		/* the streams it has open, "." for an untagged one: in memory only, like online */
+		o += (size_t)snprintf(out + o, 400, "%s %s %d %s %s\n", id, pubs[i], tl > 0, names[i][0] ? names[i] : "-", tl ? tags : "-");
 	}
 	reply(fd, "200 OK", out);
 	free(out);
@@ -1479,10 +1552,10 @@ static void route_revoke(int fd, Body *b, const char *acct) {
 	if (x) {
 		pthread_mutex_lock(&dlock);
 		x->acct[0] = '\0';
-		x->tok_exp = 0;
+		memset(x->tok_exp, 0, sizeof x->tok_exp);
 		pthread_mutex_unlock(&dlock);
 		pthread_mutex_lock(&x->w);
-		if (x->down >= 0) shutdown(x->down, SHUT_RDWR);
+		for (int s = 0; s < DEV_STREAMS; s++) if (x->st[s].fd >= 0) shutdown(x->st[s].fd, SHUT_RDWR);
 		pthread_mutex_unlock(&x->w);
 	}
 	reply(fd, "200 OK", "ok\n");
@@ -1550,15 +1623,22 @@ static void *conn_thread(void *arg) {
 		char acct[17] = "";
 		const char *r = req + (req[0] == 'G' ? 8 : 9);
 		int si;
+		char tag[TAG_MAX + 1];
 		if (d) dev_acct(d, acct);
 		if (!d) reply(fd, "401 Unauthorized", "sign in\n");
-		else if (!strncmp(req, "GET /v1/down ", 13)) route_down(fd, d);
+		else if (!strncmp(req, "GET /v1/down", 12) && (req[12] == ' ' || req[12] == '?')) {
+			if (query_tag(req + 12, tag)) reply(fd, "400 Bad Request", "want: ?s=<tag>, 1 to 12 of 0-9 a-z\n");
+			else route_down(fd, d, tag);
+		}
 		else if (req[0] == 'G') {
 			if (!strncmp(r, "devices ", 8) && acct[0]) route_devices(fd, acct);
 			else if (!strncmp(r, "account ", 8) && acct[0]) route_account(fd, acct);
 			else reply(fd, acct[0] ? "404 Not Found" : "403 Forbidden", "no\n");
 		}
-		else if (!strncmp(r, "up ", 3)) route_up(fd, &b, d);
+		else if (!strncmp(r, "up", 2) && (r[2] == ' ' || r[2] == '?')) {
+			if (query_tag(r + 2, tag)) reply(fd, "400 Bad Request", "want: ?s=<tag>, 1 to 12 of 0-9 a-z\n");
+			else route_up(fd, &b, d, tag);
+		}
 		else if (!strncmp(r, "webauthn/challenge ", 19)) route_wa_challenge(fd, d);
 		else if (!strncmp(r, "passkey/register ", 17)) route_pk_register(fd, &b, d, ip);
 		else if (!strncmp(r, "passkey/login ", 14)) route_pk_login(fd, &b, d, ip);
