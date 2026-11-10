@@ -2418,6 +2418,7 @@ let state = { provider: '', model: '', turns: 0, session: '', dir: '', version: 
               home: '', places: [], folder: '', root: '',
               session_name: '', theme: '', theme_slots: null, commands: null, remote: false, update: null, voice: 0, mode: '', yolo: 0 };
 const STATE0 = JSON.stringify(state);    /* a session newly shown starts from here */
+let agentsNow = { me: '', route: '', agents: [] }, agentsAt = 0;   /* the hakos on the shown session */
 const askBoxes = new Map();
 
 /* ---------- capability handshake ----------
@@ -2471,6 +2472,7 @@ async function handshake() {
 async function refreshState() {
 	await handshake();
 	await loadSessions();
+	loadAgents(true);
 }
 const closeNav = () => document.body.classList.remove('nav');
 
@@ -4042,6 +4044,7 @@ const esMessage = (ev) => {
 			settleOpenChoices();
 			loadSessions();
 			loadFiles();
+			loadAgents(true);
 			break;
 		case 'error': dropLive(); add('turn error', '', m.text || 'error'); setBusy(false); break;
 	}
@@ -4067,6 +4070,7 @@ function showSession(id) {
 	if (id) carrierFor(id).att.fresh = false; else bootLocal();
 	history.replaceState(null, '', location.pathname + (id ? '#remote=' + id : ''));
 	state = JSON.parse(STATE0); caps = new Set(); pendingInput = null; sessionList = [];
+	agentsNow = { me: '', route: '', agents: [] }; agentsAt = 0;
 	clearLog(); setBusy(false); renderPending(); renderSessions(); renderMeta();
 	openEvents();
 	window.dispatchEvent(new Event('hako-attention'));
@@ -4109,6 +4113,7 @@ const ICO = {
 	device: '<svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M8.5 20h7M12 16v4"/></svg>',
 	speak: '<svg class="i" viewBox="0 0 24 24"><path d="M4.5 9.5v5h3.5l5 4v-13l-5 4z"/><path d="M16 9.2a4 4 0 0 1 0 5.6M18.6 6.8a7.5 7.5 0 0 1 0 10.4"/></svg>',
 	stop: '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+	agents: '<svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="6" width="9" height="9" rx="1.5"/><rect x="11.5" y="9" width="9" height="9" rx="1.5"/></svg>',
 };
 const iconEl = (k) => { const t = document.createElement('template'); t.innerHTML = ICO[k]; return t.content.firstChild; };
 
@@ -4184,6 +4189,10 @@ function renderPills() {
 	el.appendChild(pill('folder', folder || 'no folder', state.dir || 'pick a folder', () => { closeNav(); openBrowser(); }));
 	el.appendChild(pill('model', state.model || (state.provider && state.provider !== 'none' ? state.provider : 'pick a model'),
 		(state.provider || 'no provider') + (state.model ? ' / ' + state.model : ''), () => openModelPicker()));
+	if (agentsNow.agents.length > 1) {
+		const names = agentsNow.agents.map((a) => a.name + (a.state === 'busy' ? ' (working)' : '')).join(', ');
+		el.appendChild(pill('agents', agentsNow.agents.length + ' hakos', 'on this session: ' + names, openAgents));
+	}
 	if (caps.has('approve')) {
 		const mode = state.mode || (state.yolo ? 'auto' : 'ask');
 		el.appendChild(pill('mode', mode, 'ask: every tool asks first · plan: no changes · auto: tools run without asking', openModePicker));
@@ -4406,9 +4415,49 @@ function addSay(el, text) {
    the terminal and the editor's pane draw). `:` runs hako itself, `/` drives the
    model; the wrong one still works, and the menu shows where each lives. A core
    that sends no table gets no menu, and the line works as it always did. */
+/* ---------- the hakos on this session ----------
+   A core with caps "agents" lists every hako on the session it shares (each with
+   its own model). @ completes the live ones; the pill shows who is there. */
+async function loadAgents(force) {
+	if (!caps.has('agents')) { agentsNow = { me: '', route: '', agents: [] }; return; }
+	if (!force && Date.now() - agentsAt < 2000) return;
+	agentsAt = Date.now();
+	const at = REMOTE_ID;
+	try {
+		const j = await (await fetch('/api/agents')).json();
+		if (at !== REMOTE_ID || !j || !Array.isArray(j.agents)) return;
+		agentsNow = { me: j.me || '', route: j.route || '', agents: j.agents };
+	} catch (e) { return; }
+	renderPills();
+	if (/^@/.test(input.value)) renderMenu();
+}
+const otherAgents = () => agentsNow.agents.filter((a) => !a.me);
+function openAgents() {
+	const m = modal('on this session');
+	for (const a of agentsNow.agents) {
+		const sub = (a.provider || '') + (a.model ? ' \u00b7 ' + a.model : '') + (a.state === 'busy' ? ' \u00b7 working' : '');
+		m.body.appendChild(optionRow(a.name, sub, a.me ? 'the one you type to' : '', () => {
+			m.close(); if (a.me) return;
+			input.value = '@' + a.name + ' '; input.focus(); syncInput();
+		}, a.me));
+	}
+	const route = agentsNow.route && agentsNow.route !== agentsNow.me ? agentsNow.route : '';
+	m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note',
+		textContent: 'a line without @ goes to ' + (route || agentsNow.me || 'this one') + '. @name asks another; :route <name> sends every line there.' }));
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(g, mb('close', '', m.close));
+}
+
 const cmdmenu = $('cmdmenu');
 let menuItems = [], menuSel = 0, menuShut = null;
 function menuMatches(line) {
+	const at = String(line).match(/^@([a-z0-9-]*)$/i);
+	if (at && !codeLanding()) {
+		loadAgents();
+		const w = at[1].toLowerCase();
+		return otherAgents().filter((a) => a.name.startsWith(w)).map((a) => ({ p: '@', n: a.name, a: '<text>',
+			d: (a.provider || '') + (a.model ? ' ' + a.model : ''), c: a.state === 'busy' ? 'working' : '' }));
+	}
 	const cmds = state.commands;
 	if (!Array.isArray(cmds) || !cmds.length || codeLanding()) return [];
 	const m = String(line).match(/^([:/])(\S*)$/);
@@ -4705,7 +4754,7 @@ if (window.visualViewport) {
 }
 input.addEventListener('focus', () => setTimeout(() => { if (!landing) log.scrollTop = log.scrollHeight; }, 250));
 
-handshake().then(() => { loadSessions(); browserNotice(); });
+handshake().then(() => { loadSessions(); loadAgents(true); browserNotice(); });
 renderChrome();
 window.hakoAccount.boot();
 </script>

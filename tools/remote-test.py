@@ -370,6 +370,36 @@ with sync_playwright() as p:
     except Exception: pass
     ck(pg.locator('.turn.model').count() > n0 and until(rb"still there after all that", 3) is not None,
        "switch: and a turn there still works, both ways")
+    # a second hako joins the shared folder's chat: the page lists both, @ completes the
+    # other, and a line for it is answered there and shows here
+    pid3, fd3 = pty.fork()
+    if pid3 == 0:
+        os.chdir(PROJ)
+        os.execve(HAKO, [HAKO], dict(os.environ, HOME=HOME, HAKO_HAKM=FAKE, TERM="xterm-256color",
+                  HAKO_RELAY_URL="http://127.0.0.1:%d" % RP, HAKO_STUDIO_URL=STUDIO, HAKO_NO_BROWSER="1"))
+    fcntl.ioctl(fd3, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 400, 0, 0))
+    atexit.register(lambda: os.kill(pid3, signal.SIGKILL))
+    seen3 = [b""]
+    def reader3():
+        while True:
+            r, _, _ = select.select([fd3], [], [], 0.2)
+            if r:
+                try: seen3[0] += os.read(fd3, 65536)
+                except OSError: return
+    threading.Thread(target=reader3, daemon=True).start()
+    time.sleep(2.0); os.write(fd3, b"\r"); time.sleep(1.5)        # its own chat at first; then join
+    ck(b"starts its own" in seen3[0], "agents: a second hako in the shared folder starts its own chat")
+    os.write(fd3, b":join\r"); time.sleep(1.5)
+    pg.evaluate("typeof loadAgents === 'function' && loadAgents(true)"); pg.wait_for_timeout(1500)
+    ck("2 hakos" in pg.evaluate(pills), "agents: once it joins, the page says two hakos are on the session (%r)" % pg.evaluate(pills))
+    pg.fill('#input', '@'); pg.dispatch_event('#input', 'input'); pg.wait_for_timeout(1200)
+    ck(pg.locator('#cmdmenu .cmd .n').all_inner_texts() == ['@sho2'], "agents: @ completes the other hako, and only it (%r)" % pg.locator('#cmdmenu .cmd .n').all_inner_texts())
+    pg.fill('#input', '@sho2 TELL from the page'); pg.click('#send')
+    try: pg.wait_for_function("document.getElementById('log').innerText.includes('sho2: Okay')", timeout=25000)
+    except Exception: pass
+    ck(b"[from sho] TELL from the page" in seen3[0] and "sho2: Okay" in pg.inner_text('#log'),
+       "agents: @sho2 from the page runs on the other hako, and its answer shows here")
+    os.write(fd3, b":q\r"); time.sleep(1.0)
     os.write(fd2, b":remote off\r"); time.sleep(2.0)
     pg.evaluate("window.hakoAccount.show(true)"); pg.wait_for_timeout(1500)
     ck(pg.evaluate(CAR + ".size") == 1 and pg.evaluate(CAR + ".has(%r)" % A),

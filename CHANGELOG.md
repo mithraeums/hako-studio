@@ -11,6 +11,7 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
 
 ### added
+- a code session with several hakos on it (each with its own model) says so: a pill lists them, and `@` in the composer completes only the live ones; a line for one is answered there and shows here
 - switching sessions no longer reloads the page: a code session, another one or chat opens in place, and the one left stays connected, so coming back is instant and its transcript is there
 - each code session open in a window keeps its own end-to-end session (a hako.wasm slot, up to 8), and the menu marks one out of sight that is asking you something, working, or finished since you looked
 - the session's mode pill offers auto from a linked device too; set that way it ends when remote turns off
