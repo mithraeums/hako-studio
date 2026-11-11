@@ -6,9 +6,7 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 
 ## [Unreleased]
 
-### changed
-- the menu: an open folder holds its chats, indented under it, and only the open chat is highlighted, as one even bubble with its ⋯ inside
-- the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
+## [v0.2.0] - 2026-11-11
 
 ### added
 - a code session with several hakos on it (each with its own model) says so: a pill lists them, and `@` in the composer completes only the live ones; a line for one is answered there and shows here
@@ -16,6 +14,12 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - each code session open in a window keeps its own end-to-end session (a hako.wasm slot, up to 8), and the menu marks one out of sight that is asking you something, working, or finished since you looked
 - the session's mode pill offers auto from a linked device too; set that way it ends when remote turns off
 - account, your devices: everything bound to the account, with remove, and remove offline for the lot; a deleted home-screen app or cleared site data has no way to sign itself out
+- images in the browser's own agent: paste, drop or pick a picture and the model sees it with your message, as it already did under `hako --serve`. The page hands the bytes to the agent in hako.wasm, which attaches them the way it does everywhere else
+
+### changed
+- the menu: an open folder holds its chats, indented under it, and only the open chat is highlighted, as one even bubble with its ⋯ inside
+- the home-screen icon is full-bleed, one flat light mark on black, so a tinted home screen keeps it legible
+- on a touch screen nothing reacts to where a finger was: hover styling is for mouse and trackpad only, and a tap dims what it pressed
 
 ### fixed
 - a home-screen app on iOS 26: sheets' buttons and the composer were out of sight, the page was sized to the screen while iOS paints less; the header clears the blur under the status bar
@@ -25,14 +29,6 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - relay: a device holds up to 8 streams, each with a tag, and a frame goes to `<id>/<tag>` or to all of a device's streams; `/v1/devices` lists each device's open tags, in memory only
 - relay: a device keeps its newest 8 sign-in tokens, so a window signing in no longer ends another's
 - a full account no longer says "this browser is signed in to another account": the relay answers 507 and the page says the account is full
-
-### added
-- images in the browser's own agent: paste, drop or pick a picture and the model sees it with your message, as it already did under `hako --serve`. The page hands the bytes to the agent in hako.wasm, which attaches them the way it does everywhere else
-
-### changed
-- on a touch screen nothing reacts to where a finger was: hover styling is for mouse and trackpad only, and a tap dims what it pressed
-
-### fixed
 - on a phone the keyboard no longer covers a sheet's field (the profile name, sign-in, pairing): sheets sit in the visible part of the screen, like the composer
 - tapping the chat that is already open just shows it: it resumed it again, and a remote session's desktop printed "resumed" for every tap
 - the browser's store keeps a binary file as its bytes: it read every file as text, which would have mangled any image it held
