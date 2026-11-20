@@ -4,7 +4,21 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
-## [Unreleased]
+## [v0.2.1] - 2026-11-19
+
+### added
+- while a turn runs you can still type: a message waits above the field and goes when the turn ends (several go as one), `send now` puts it into the running turn (hako reads it after the tools it is running; an older hako stops the turn and sends it), `×` drops it. a command (`:mode auto`) goes at once
+- a turn's tool calls fold into one row, "worked 42s · 6 steps · 1 failed", that opens to show each, so the reply reads as the main thing; an approval, once answered, folds into it too; code blocks have a copy button
+- who is on the chat: each hako in the header (its initial, ringed or filled, a pulse while it works) and how many pages are open; a reply is marked with the hako that gave it, and a line asked at another hako's pane shows as theirs
+- a `:say` line (between the people on the chat, no model answers it) shows as one, with who said it
+- backgrounds in settings, drawn from the theme's own inks: rays, stars (a mithraeum's painted ceiling), dusk, or your own image, toned to the theme; a faint paper grain under everything (on by default, can be turned off)
+- motion: rows rise in, the streaming reply has a caret, a chat switch fades in, menus ease open; none of it on a replay or with reduced motion on
+- a serif for what reads as a title (a reply's headings, the chat's name, menus), and a rule in a reply is a mark between two hairlines
+
+### fixed
+- switching to auto from the mode pill mid-turn took effect only after the turn, so every approval still had to be answered; it takes at once now, the waiting one included (hako-code)
+- a long chat follows each reply to its end again: once it was taller than the screen, a reply landed below the fold and the chat stopped following, so on a phone you kept scrolling down by hand. scrolled up to read, it leaves you there
+- a reconnect (the phone waking, a network blip) rebuilt the chat at its top; it opens at its end now
 
 ## [v0.2.0] - 2026-11-11
 
