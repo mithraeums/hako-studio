@@ -306,7 +306,117 @@
 	.ask.settled { border-color: var(--line); opacity: .75; }
 	.ask.settled .row { display: none; }
 	.ask .verdict { color: var(--dim); font-size: 12px; margin-left: .5rem; }
+	.wbody .ask.settled { border: 0; background: none; padding: 0; margin: .15rem 0; opacity: 1; color: var(--dim); }
+	.wbody .ask.settled .head { color: var(--dim); }
+	.wbody .ask.settled .subj { display: inline; margin: 0 0 0 .5rem; }
 	.turn a, .system a { color: var(--gold); }
+
+	/* ---- a turn's work: its tool calls fold into one row, so the reply reads as the main thing ---- */
+	.work { margin: 0 0 .8rem; }
+	.work > .whead {
+		display: flex; align-items: center; gap: .45rem; width: calc(100% + .5rem); text-align: left; min-width: 0;
+		border: 0; border-radius: 8px; padding: .3rem .5rem; margin-left: -.5rem; color: var(--dim); font-size: 12.5px;
+	}
+	@media (hover: hover) { .work > .whead:hover { background: var(--panel); color: var(--bone); border-color: transparent; } }
+	.whead .car { display: inline-block; color: var(--faint); transition: transform .18s ease; }
+	.work.open .whead .car { transform: rotate(90deg); }
+	.whead .lbl { flex: none; }
+	.whead .now { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+	.whead .bad { color: var(--err); }
+	.work.live .whead .lbl::before {
+		content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--phos);
+		margin-right: .45rem; vertical-align: 1px; animation: pulse 1.4s ease-in-out infinite;
+	}
+	.work > .wbody { display: none; padding: .45rem 0 0 .15rem; }
+	.work.open > .wbody { display: block; animation: rise .18s ease-out both; }
+	.work > .wbody > .tool { margin: 0 0 .3rem; font-size: 12.5px; }
+	.work > .wbody > .tool.result { margin: -.1rem 0 .45rem; }
+	.work > .wbody > :last-child { margin-bottom: 0; }
+	/* a code block keeps a copy button in its corner, outside what scrolls */
+	.codebox { position: relative; margin: 0 0 .65rem; }
+	.codebox > pre { margin: 0; }
+	.codebox > .copy {
+		position: absolute; top: .4rem; right: .4rem; font-size: 11px; padding: .1rem .5rem;
+		background: var(--bg); color: var(--dim); opacity: 0; transition: opacity .15s;
+	}
+	@media (hover: hover) { .codebox:hover > .copy { opacity: 1; } }
+	@media (hover: none) { .codebox > .copy { opacity: .85; } }
+	.codebox > .copy:focus-visible, .codebox > .copy.done { opacity: 1; }
+	/* who said it: a small mark for a hako, and a line from another hako's pane */
+	.av {
+		display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px;
+		border-radius: 50%; border: 1px solid currentColor; font-size: 9px; line-height: 1; letter-spacing: 0; text-transform: none;
+	}
+	.av.fill { background: currentColor; }
+	.av.fill > b { color: var(--bg); font-weight: 600; }
+	.av > b { font-weight: 600; }
+	.user.peer { margin-left: 0; background: transparent; border: 1px solid var(--line); }
+	/* a line between the people on the chat (:say): no bubble, a quiet rule at its side */
+	.chat { color: var(--bone); border-left: 2px solid var(--gold-dim); padding: .1rem 0 .1rem .7rem; }
+	.chat .who { color: var(--dim); }
+	.user.peer .who { color: var(--dim); }
+	.presence { display: flex; align-items: center; padding-left: 5px; }
+	.presence .av {
+		width: 22px; height: 22px; font-size: 11px; margin-left: -5px; color: var(--dim); background: var(--bg);
+		border-color: var(--line-2); box-shadow: 0 0 0 2px var(--bg); position: relative; cursor: pointer;
+	}
+	.presence .av.fill { background: var(--dim); border-color: var(--dim); }
+	.presence .av.me { color: var(--bone); border-color: var(--bone); }
+	.presence .av.me.fill { background: var(--bone); }
+	.presence .av.busy::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--phos); animation: pulse 1.4s ease-in-out infinite; }
+	.presence .dev { font-size: 11px; color: var(--faint); margin-left: .5rem; white-space: nowrap; }
+
+	/* ---- motion: things arrive, nothing jumps. Off for a replay and for reduced motion ---- */
+	@keyframes rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+	@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+	@keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+	@keyframes blink { 50% { opacity: 0; } }
+	#log > .turn, #log > .work, #log > .ask, #log > .tool, #log > .thinking, .queued .chip, .tray .chip { animation: rise .24s cubic-bezier(.2, .7, .3, 1) both; }
+	#log.still > * { animation: none; }
+	#log.swap { animation: fadein .28s ease-out; }
+	.turn.live::after { content: '\258f'; margin-left: 1px; color: var(--gold-dim); animation: blink 1.05s steps(1) infinite; }
+	.scrim { animation: fadein .16s ease-out; }
+	.scrim .modal { animation: rise .2s cubic-bezier(.2, .7, .3, 1) both; }
+	@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+	/* ---- texture and type: paper grain under everything, a serif for what is read as a title ---- */
+	#backdrop { position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--bg); }
+	#backdrop::before, #backdrop::after { content: ''; position: absolute; inset: 0; }
+	body.grain #backdrop::after {
+		opacity: .075; mix-blend-mode: multiply;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+	}
+	:root[data-tone="dark"] body.grain #backdrop::after { filter: invert(1); mix-blend-mode: screen; opacity: .05; }
+	#backdrop[data-bg="rays"]::before {
+		background: repeating-conic-gradient(from -90deg at 50% 118%, color-mix(in srgb, var(--bone) 4%, transparent) 0deg 1.4deg, transparent 1.4deg 7deg);
+		-webkit-mask-image: linear-gradient(to top, #000, transparent 85%); mask-image: linear-gradient(to top, #000, transparent 85%);
+	}
+	#backdrop[data-bg="stars"]::before {
+		background:
+			radial-gradient(1px 1px at 23% 31%, var(--dim) 50%, transparent 51%) 0 0 / 131px 131px,
+			radial-gradient(1px 1px at 71% 77%, var(--faint) 50%, transparent 51%) 0 0 / 173px 173px,
+			radial-gradient(1.4px 1.4px at 41% 63%, var(--dim) 50%, transparent 51%) 0 0 / 239px 239px,
+			radial-gradient(1.8px 1.8px at 85% 15%, var(--faint) 50%, transparent 51%) 0 0 / 311px 311px;
+		opacity: .8;
+	}
+	#backdrop[data-bg="dusk"]::before { background: radial-gradient(130% 75% at 50% 115%, var(--panel-2), transparent 72%); }
+	#backdrop[data-bg="image"]::before { background: var(--bd-img) center / cover no-repeat; }
+	#backdrop[data-bg="image"] { background: var(--bg); }
+	#backdrop[data-bg="image"]::before { opacity: .22; filter: grayscale(1) contrast(1.05); }
+	body { background: var(--bg); }
+	header { background: color-mix(in srgb, var(--bg) 78%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+	aside { background: color-mix(in srgb, var(--panel) 90%, transparent); }
+	.md h1, .md h2, .md h3 { font-family: var(--serif); font-weight: 500; letter-spacing: -.005em; }
+	.md h1 { font-size: 1.4em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.06em; }
+	header .title { font-family: var(--serif); font-size: 14.5px; color: var(--bone); }
+	.modal h2 { font-family: var(--serif); font-weight: 500; letter-spacing: -.005em; }
+	/* a rule in a reply is a mark between two hairlines */
+	.md hr {
+		position: relative; height: 1rem; border: 0; margin: 1rem 0; overflow: visible;
+		background: linear-gradient(var(--line), var(--line)) left center / calc(50% - 1.1rem) 1px no-repeat,
+		            linear-gradient(var(--line), var(--line)) right center / calc(50% - 1.1rem) 1px no-repeat;
+	}
+	.md hr::after { content: '\2736'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -54%); color: var(--faint); font-size: 10px; }
 
 	/* ---- the composer: one box, a + and send inside, chips under it ---- */
 	form {
@@ -339,6 +449,10 @@
 	.chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.chip .rm { color: var(--faint); cursor: pointer; border: 0; background: none; font: inherit; padding: 0 .1rem; }
 	@media (hover: hover) { .chip .rm:hover { color: var(--err); } }
+	/* Said while a turn runs: held here until it ends, or sent now (the turn stops). */
+	.queued { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .55rem .6rem 0; }
+	.queued .nm { color: var(--dim); }
+	.queued .go { color: var(--gold); cursor: pointer; border: 0; background: none; font: inherit; padding: 0 .2rem; white-space: nowrap; }
 	.pills { display: flex; align-items: center; gap: .2rem; padding: .35rem .25rem 0; min-width: 0; }
 	.pill {
 		display: inline-flex; align-items: center; gap: .35rem; min-width: 0; max-width: 46%;
@@ -542,6 +656,7 @@
 </style>
 </head>
 <body>
+<div id="backdrop" aria-hidden="true"></div>
 
 <aside id="side" aria-label="menu">
 	<div class="shead">
@@ -574,6 +689,7 @@
 		<span class="wordmark hmark" id="hmark" role="img" aria-label="hako"></span>
 		<span class="title" id="title"></span>
 		<span class="spacer"></span>
+		<span class="presence" id="presence" hidden></span>
 		<span class="ind" id="ind"></span>
 		<span class="dot" id="dot" aria-hidden="true">●</span>
 		<span class="meta" id="meta">connecting…</span>
@@ -588,6 +704,7 @@
 		<form id="form">
 			<div class="cmdmenu" id="cmdmenu" role="listbox" hidden></div>
 			<div class="cbox">
+				<div id="queued" class="queued" hidden></div>
 				<div id="tray" class="tray" hidden></div>
 				<textarea id="input" rows="1" placeholder="ask anything; : or / for commands" autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="message"></textarea>
 				<div class="crow">
@@ -1321,7 +1438,7 @@ function makeCarrier(id, slot) {
 			case 'choice_request': a.asks.add('c' + m.id); break;
 			case 'choice_decision': a.asks.delete('c' + m.id); break;
 			case 'input_request': a.asks.add('in'); break;
-			case 'message': if (m.role === 'user') { a.busy = true; a.asks.delete('in'); } break;
+			case 'message': if (m.role === 'user' && !m.by) { a.busy = true; a.asks.delete('in'); } break;
 			case 'done': case 'error':
 				a.busy = false; a.asks.clear();
 				if (!shown() && Date.now() > replayTill) a.fresh = true;
@@ -2318,7 +2435,7 @@ const SETTINGS_KEY = 'hako.studio.settings';
    auto (the system's) for the two themes that have both; side_off: the menu folded
    away; pins/archived: session ids; name/avatar: the profile, on this device only */
 const defaults = { theme: 'mithraeum', theme_picked: false, appearance: 'auto', modelPaths: [], consented: false, spinner: 'braille',
-                   side_off: false, voice: false, pins: [], archived: [], name: '', avatar: '' };
+                   side_off: false, voice: false, pins: [], archived: [], name: '', avatar: '', backdrop: 'none', grain: true };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
 /* Before 10-29 every page saved its theme on load, picked or not, so washi (an old
@@ -2395,7 +2512,41 @@ function paintTheme(name, slots) {
 	for (const k in t) document.documentElement.style.setProperty('--' + k, t[k]);
 	const tc = document.querySelector('meta[name="theme-color"]');
 	if (tc) tc.content = t.bg;
+	/* light or dark ground, for the grain's blend */
+	const c = /^#([0-9a-f]{6})$/i.exec(t.bg || '');
+	const lum = c ? [0, 2, 4].reduce((a, i, k) => a + parseInt(c[1].slice(i, i + 2), 16) * [.299, .587, .114][k], 0) : 255;
+	const de = document.documentElement;
+	if (de.setAttribute) de.setAttribute('data-tone', lum < 128 ? 'dark' : 'light');
 	themeShown = name || 'mithraeum';
+}
+/* ---------- backgrounds: kept in this browser, drawn from the theme's own inks ---------- */
+const BACKDROPS = [['none', 'plain', 'the theme\u2019s ground'], ['rays', 'rays', 'sol\u2019s, from below'],
+	['stars', 'stars', 'a mithraeum\u2019s painted ceiling'], ['dusk', 'dusk', 'light from under the field'],
+	['image', 'your image', 'a picture from this device, toned to the theme']];
+const BD_IMG = 'hako-backdrop';
+function paintBackdrop() {
+	const bd = $('backdrop');
+	if (!bd || !bd.setAttribute) return;
+	let b = settings.backdrop || 'none', img = '';
+	if (b === 'image') { try { img = localStorage.getItem(BD_IMG) || ''; } catch (e) {} if (!img) b = 'none'; }
+	bd.setAttribute('data-bg', b === 'none' ? '' : b);
+	if (bd.style && bd.style.setProperty) bd.style.setProperty('--bd-img', img ? 'url("' + img + '")' : 'none');
+	document.body.classList.toggle('grain', settings.grain !== false);
+}
+function pickBackdropImage(done) {
+	const f = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*' });
+	f.addEventListener('change', async () => {
+		const file = f.files && f.files[0];
+		if (!file) return;
+		try {
+			const small = await shrinkImage(file);
+			const url = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(small); });
+			localStorage.setItem(BD_IMG, url);
+			settings.backdrop = 'image'; saveSettings(); paintBackdrop();
+			if (done) done();
+		} catch (e) { flashStatus('that image could not be kept here'); }
+	});
+	f.click();
 }
 /* A pick in settings. The rc's own theme (state.theme) decides unless this browser
    picked one; under hako --serve a pick is written to the rc, so the two agree. */
@@ -2410,6 +2561,7 @@ function effectiveTheme() {
 	return [settings.theme, null];
 }
 paintTheme(settings.theme);
+paintBackdrop();
 if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', () => { const [n, sl] = effectiveTheme(); paintTheme(n, sl); });
 
 /* ---------- state ---------- */
@@ -2445,6 +2597,7 @@ function takeState(j) {
 	if ('voice_rate' in j) state.voice_rate = +j.voice_rate || 0;
 	if ('mode' in j) state.mode = j.mode || '';
 	if ('yolo' in j) state.yolo = +j.yolo || 0;
+	if ('watching' in j) state.watching = +j.watching || 0;
 	if ('theme' in j || 'theme_slots' in j) { const [n, sl] = effectiveTheme(); paintTheme(n, sl); }
 	renderChrome();
 }
@@ -2476,15 +2629,24 @@ async function refreshState() {
 }
 const closeNav = () => document.body.classList.remove('nav');
 
-function clearLog() { stopThinking(); log.textContent = ''; askBoxes.clear(); live = null; voice.stop(); setLanding(true); }
+function clearLog() { stopThinking(); log.textContent = ''; follow = true; askBoxes.clear(); live = null; work = null; voice.stop(); setLanding(true); }
 /* The reply as it streams. The finished message replaces it; a tool call or the
    turn's end drops what is left (a withdrawn tool block, never the answer). */
 let live = null;
 function dropLive() { if (live) { live.remove(); live = null; } }
 function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
+/* Following the chat is the reader's choice, made by scrolling, not a guess at each
+   add: a reply's markdown is filled in after add() scrolled, so it landed below the
+   fold, the next add was not "at the bottom", and the chat stopped following for good
+   (2026-11-17, a day on the phone). Anything that grows the chat keeps it down. */
+let follow = true;
+log.addEventListener('scroll', () => { follow = atBottom(); }, { passive: true });
+const keepDown = () => { if (follow) log.scrollTop = log.scrollHeight; };
+if (typeof MutationObserver === 'function') new MutationObserver(keepDown).observe(log, { childList: true, subtree: true, characterData: true });
+log.addEventListener('load', keepDown, true);          /* an image's height comes late */
 /* What makes a conversation: anything but a system notice. Until one arrives the
    page is the landing, the greeting with the composer under it. */
-const CONVERSATION = /\b(user|model|tool|ask|error)\b/;
+const CONVERSATION = /\b(user|model|tool|ask|error|chat|work)\b/;
 /* Markdown for the model's replies, built as DOM nodes only: nothing the model writes is
    ever parsed as HTML. Links are http(s) only. Blocks: fences, headings, lists (task boxes,
    one level of nesting), quotes, rules, tables, paragraphs with their line breaks kept. */
@@ -2584,13 +2746,89 @@ function md(text) {
 	flush();
 	return out;
 }
-function addModel(text) {                        /* a reply: markdown, not raw text */
-	const el = add('turn model md', 'hako', '');
+function addModel(text, by) {                    /* a reply: markdown, not raw text */
+	const el = add('turn model md', by || 'hako', '');
+	const w = el.querySelector('.who');
+	if (w) w.prepend(avatar(by || 'hako'));
 	el.appendChild(md(text));
+	for (const pre of el.querySelectorAll('pre')) {
+		const box = document.createElement('div');
+		box.className = 'codebox';
+		pre.replaceWith(box);
+		const b = document.createElement('button');
+		b.type = 'button'; b.className = 'copy'; b.textContent = 'copy'; b.title = 'copy this block';
+		b.addEventListener('click', async () => {
+			try { await navigator.clipboard.writeText(pre.textContent); b.textContent = 'copied'; }
+			catch (e) { b.textContent = 'select it'; }
+			b.classList.add('done');
+			setTimeout(() => { b.textContent = 'copy'; b.classList.remove('done'); }, 1400);
+		});
+		box.append(pre, b);
+	}
+	return el;
+}
+/* A hako's mark: its initial, ringed or filled by its name, so two read apart at a glance. */
+function avatar(name) {
+	const v = document.createElement('span'), b = document.createElement('b');
+	v.className = 'av';
+	b.textContent = ((String(name || 'h').match(/[a-z0-9]/i) || ['h'])[0]).toLowerCase();
+	v.appendChild(b);
+	let h = 0;
+	for (const c of String(name || '')) h = (h * 31 + c.charCodeAt(0)) | 0;
+	if (h & 1) v.classList.add('fill');
+	return v;
+}
+
+/* ---------- a turn's work ----------
+   Its tool calls fold into one row, "worked 42s · 6 steps", that opens to show each;
+   the reply under it reads as the main thing. A group takes tool rows while it is the
+   last thing in the chat; anything said after it closes it. */
+let work = null;
+const fmtDur = (s) => s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60 ? s % 60 + 's' : '');
+function paintWork(w) {
+	const secs = Math.round((Date.now() - w.t0) / 1000), live = w.el.classList.contains('live');
+	w.lbl.textContent = (live ? 'working' : 'worked' + (w.timed && secs >= 1 ? ' ' + fmtDur(secs).trim() : ''))
+		+ ' \u00b7 ' + w.steps + (w.steps === 1 ? ' step' : ' steps');
+	if (w.fails) w.lbl.appendChild(Object.assign(document.createElement('span'), { className: 'bad', textContent: ' \u00b7 ' + w.fails + ' failed' }));
+}
+function closeWork() {
+	if (!work) return;
+	work.el.classList.remove('live');
+	work.now.textContent = '';
+	paintWork(work);
+	work = null;
+}
+function workRow() {
+	const last = spinEl ? spinEl.previousElementSibling : log.lastElementChild;
+	if (work && work.el === last) return work;
+	closeWork();
+	setLanding(false);
+	const el = document.createElement('div');
+	el.className = 'work live';
+	const head = document.createElement('button');
+	head.type = 'button'; head.className = 'whead'; head.setAttribute('aria-expanded', 'false');
+	const car = Object.assign(document.createElement('span'), { className: 'car', textContent: '\u203a' });
+	const lbl = Object.assign(document.createElement('span'), { className: 'lbl' });
+	const now = Object.assign(document.createElement('span'), { className: 'now' });
+	head.append(car, lbl, now);
+	const body = Object.assign(document.createElement('div'), { className: 'wbody' });
+	el.append(head, body);
+	head.addEventListener('click', () => { const o = el.classList.toggle('open'); head.setAttribute('aria-expanded', String(o)); });
+	if (spinEl) log.insertBefore(el, spinEl); else log.appendChild(el);
+	work = { el, lbl, now, body, steps: 0, fails: 0, t0: Date.now(), timed: !replaying };
+	paintWork(work);
+	return work;
+}
+function addTool(cls, text, step) {
+	const w = workRow();
+	const el = add(cls, '', text, w.body);
+	if (step) { w.steps++; w.now.textContent = text; }
+	if (/\bfail\b/.test(cls)) w.fails++;
+	paintWork(w);
 	return el;
 }
 
-function add(cls, who, text) {
+function add(cls, who, text, parent) {
 	if (CONVERSATION.test(cls)) setLanding(false);
 	const stick = atBottom();
 	const el = document.createElement('div');
@@ -2610,7 +2848,8 @@ function add(cls, who, text) {
 			el.appendChild(a);
 		} else if (part) el.appendChild(document.createTextNode(part));
 	});
-	if (spinEl) log.insertBefore(el, spinEl);   /* keep the spinner last */
+	if (parent) parent.appendChild(el);
+	else if (spinEl) log.insertBefore(el, spinEl);   /* keep the spinner last */
 	else log.appendChild(el);
 	if (stick) log.scrollTop = log.scrollHeight;
 	return el;
@@ -2668,11 +2907,59 @@ function stopThinking() {
 }
 function setBusy(v) {
 	busy = v;
-	/* A core that can be interrupted turns the send button into a stop button —
-	   on a phone there is no Ctrl-C to fall back on. Older cores just grey out. */
-	send.disabled = v && !caps.has('stop');
-	send.textContent = v ? (caps.has('stop') ? 'stop' : '…') : 'send';
+	syncSend();
 	if (v) startThinking(); else stopThinking();
+}
+/* A core that can be interrupted turns the send button into a stop button —
+   on a phone there is no Ctrl-C to fall back on. Older cores just grey out.
+   Something typed mid-turn waits for the turn (queue); a command goes now. */
+function syncSend() {
+	const t = input.value.trim(), typed = busy && !!t;
+	send.disabled = busy && !typed && !caps.has('stop');
+	send.textContent = !busy ? 'send' : typed ? (/^[:/]/.test(t) ? 'send' : 'queue') : caps.has('stop') ? 'stop' : '…';
+}
+
+/* Said while a turn runs: held on this page, then sent as one message when the
+   turn ends. "send now" puts it into the running turn (hako reads it after the
+   tools it is running, as the user's); a core without steer stops the turn and
+   its done sends them. */
+const queued = [];
+function renderQueued() {
+	const q = $('queued');
+	q.textContent = '';
+	q.hidden = !queued.length;
+	queued.forEach((t, i) => {
+		const chip = document.createElement('span');
+		chip.className = 'chip';
+		const nm = document.createElement('span');
+		nm.className = 'nm';
+		nm.textContent = t;
+		nm.title = 'sends when this turn ends';
+		chip.append(nm);
+		if (caps.has('steer') || caps.has('stop')) {
+			const go = document.createElement('button'), steer = caps.has('steer');
+			go.className = 'go'; go.type = 'button'; go.textContent = 'send now';
+			go.title = steer ? 'into this turn: read at its next step' : 'stop this turn and send';
+			go.addEventListener('click', () => {
+				if (!busy) return flushQueued();
+				if (!steer) return post('/api/stop', '');
+				queued.splice(queued.indexOf(t), 1); renderQueued();   /* shows in the chat where the turn reads it */
+				post('/api/steer', t);
+			});
+			chip.append(go);
+		}
+		const rm = document.createElement('button');
+		rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×'; rm.title = 'remove';
+		rm.addEventListener('click', () => { queued.splice(i, 1); renderQueued(); });
+		chip.append(rm);
+		q.appendChild(chip);
+	});
+}
+function flushQueued() {
+	if (busy || !queued.length) return;
+	const t = queued.splice(0).join('\n\n');
+	renderQueued();
+	sendText(t);
 }
 
 /* hako announces provider/model changes in its normal output:
@@ -2771,6 +3058,7 @@ function askApproval(m) {
 	mk('', 'deny', 'n');
 	mk('', ALWAYS_LABEL[m.kind] || 'always allow', 'a');
 	box.append(head, subj, row);
+	box.tool = true;
 	if (spinEl) log.insertBefore(box, spinEl);   /* in order, above the spinner */
 	else log.appendChild(box);
 	if (m.id) askBoxes.set(String(m.id), box);
@@ -2866,6 +3154,8 @@ function settle(box, ans) {
 	const v = document.createElement('span');
 	v.className = 'verdict'; v.textContent = VERDICT[ans] || ans;
 	box.appendChild(v);
+	/* an answered tool call joins its turn's row, so the rest of the turn lands in that row too */
+	if (box.tool && work && box.parentNode === log && box.previousElementSibling === work.el) work.body.appendChild(box);
 }
 
 /* ---------- provider picker ----------
@@ -3519,6 +3809,24 @@ function openSettings() {
 		looks.push([a, r]);
 		m.body.appendChild(r);
 	});
+	m.body.appendChild(groupLabel('background'));
+	const bds = [];
+	const markBd = () => { for (const [k, row] of bds) { const on = k === (settings.backdrop || 'none'); row.classList.toggle('sel', on); row.firstChild.nodeValue = (on ? '\u25ce ' : '  ') + row.dataset.label; } };
+	BACKDROPS.forEach(([k, label, sub]) => {
+		const r = optionRow(label, sub, '', () => {
+			if (k === 'image') return pickBackdropImage(markBd);
+			settings.backdrop = k; saveSettings(); paintBackdrop(); markBd();
+		}, (settings.backdrop || 'none') === k);
+		r.dataset.label = label;
+		bds.push([k, r]);
+		m.body.appendChild(r);
+	});
+	const gr = optionRow(settings.grain !== false ? 'paper grain: on' : 'paper grain: off', 'a faint texture under everything', '', () => {
+		settings.grain = settings.grain === false; saveSettings(); paintBackdrop();
+		gr.firstChild.nodeValue = (settings.grain ? '\u25ce ' : '  ') + (settings.grain ? 'paper grain: on' : 'paper grain: off');
+		gr.classList.toggle('sel', settings.grain);
+	}, settings.grain !== false);
+	m.body.appendChild(gr);
 
 	/* Read aloud: the device's own voices (speechSynthesis), nothing leaves it. */
 	if (voice.ok) {
@@ -3961,7 +4269,8 @@ let replaying = true, settleTimer = setTimeout(() => { replaying = false; }, 120
 let es = null;
 const esOpen = () => {                /* also after a remote reconnect: the ring replays again */
 	dot.classList.add('on'); clearLog(); renderMeta();
-	replaying = true; clearTimeout(settleTimer); settleTimer = setTimeout(() => { replaying = false; }, 1200);
+	log.classList.add('still');                      /* a replay arrives at once: no rise for each row */
+	replaying = true; clearTimeout(settleTimer); settleTimer = setTimeout(() => { replaying = false; log.classList.remove('still'); }, 1200);
 };
 const esError = () => { dot.classList.remove('on'); meta.textContent = 'disconnected'; };
 const esMessage = (ev) => {
@@ -3988,6 +4297,18 @@ const esMessage = (ev) => {
 		}
 		case 'message':
 			dropLive();
+			closeWork();
+			if (m.role === 'chat') {                        /* :say, a line between the people here: no model answers it */
+				const el = add('turn chat', m.by || 'someone', m.text || '');
+				const w = el.querySelector('.who');
+				if (w) w.prepend(avatar(m.by || 'someone'));
+				break;
+			}
+			if (m.role === 'user' && /^[:/]say\s/.test(m.text || '')) break;   /* its chat line follows */
+			if (m.role === 'user' && m.by) {                /* asked at another hako's pane: theirs, not a turn here */
+				add('turn user peer', 'at ' + m.by + (m.to ? ' \u2192 ' + m.to : ''), m.text || '');
+				break;
+			}
 			if (m.role === 'user') {
 				if (quietEcho(m.text)) break;               /* a command this page sent for a menu pick */
 				voice.stop();
@@ -4000,7 +4321,7 @@ const esMessage = (ev) => {
 				if (quietReply(m.text)) break;
 				add('turn system', '', m.text || '');
 			} else {
-				const el = addModel(m.text || '');
+				const el = addModel(m.text || '', m.by);
 				addSay(el, m.text || '');
 				if (voice.on() && !replaying) voice.speak(m.text || '', el.querySelector('.say'));
 			}
@@ -4028,25 +4349,27 @@ const esMessage = (ev) => {
 			if (box && !box.classList.contains('settled')) settle(box, m.answer);
 			break;
 		}
-		case 'tool_start': dropLive(); add('tool', '', arrowed('→', m.display || 'tool')); break;
-		case 'tool_end':   add(/^error:/.test(m.display || '') ? 'tool fail' : 'tool', '', arrowed('←', m.display || 'done')); break;
+		case 'tool_start': dropLive(); addTool('tool', arrowed('→', m.display || 'tool'), true); break;
+		case 'tool_end':   addTool(/^error:/.test(m.display || '') ? 'tool fail' : 'tool', arrowed('←', m.display || 'done')); break;
 		case 'tool_result': {
 			/* What the tool actually returned. A byte count is not an answer to
 			   "what files are in this directory". */
-			const el = add('tool result', '', m.text || '');
+			const el = addTool('tool result', m.text || '');
 			el.style.whiteSpace = 'pre-wrap';
 			break;
 		}
 		case 'done':
 			dropLive();
+			closeWork();
 			state.turns = m.turn || state.turns;
 			renderMeta(); setBusy(false);
 			settleOpenChoices();
 			loadSessions();
 			loadFiles();
 			loadAgents(true);
+			flushQueued();
 			break;
-		case 'error': dropLive(); add('turn error', '', m.text || 'error'); setBusy(false); break;
+		case 'error': dropLive(); closeWork(); add('turn error', '', m.text || 'error'); setBusy(false); flushQueued(); break;
 	}
 };
 function openEvents() {
@@ -4071,7 +4394,9 @@ function showSession(id) {
 	history.replaceState(null, '', location.pathname + (id ? '#remote=' + id : ''));
 	state = JSON.parse(STATE0); caps = new Set(); pendingInput = null; sessionList = [];
 	agentsNow = { me: '', route: '', agents: [] }; agentsAt = 0;
+	queued.length = 0; renderQueued();          /* said for the chat it was said in */
 	clearLog(); setBusy(false); renderPending(); renderSessions(); renderMeta();
+	log.classList.remove('swap'); void log.offsetWidth; log.classList.add('swap');
 	openEvents();
 	window.dispatchEvent(new Event('hako-attention'));
 	if (window.hakoAccount.show) window.hakoAccount.show(!!id);
@@ -4142,6 +4467,26 @@ function renderChrome() {
 	if (t) t.textContent = landing ? '' : currentTitle();
 	renderInd();
 	renderPills();
+	renderPresence();
+}
+/* Who is on this chat: each hako (ringed or filled by its name, a pulse while it
+   works), and how many pages are open on it when that is more than this one. */
+function renderPresence() {
+	const el = $('presence');
+	if (!el) return;
+	el.textContent = '';
+	const hakos = agentsNow.agents.length > 1 ? agentsNow.agents : [];
+	for (const a of hakos) {
+		const v = avatar(a.name);
+		if (a.me) v.classList.add('me');
+		if (a.state === 'busy') v.classList.add('busy');
+		v.title = a.name + (a.provider ? ' \u00b7 ' + a.provider : '') + (a.model ? ' ' + a.model : '') + (a.state === 'busy' ? ' \u00b7 working' : '') + (a.me ? ' (this one)' : '');
+		v.addEventListener('click', openAgents);
+		el.appendChild(v);
+	}
+	const n = +state.watching || 0;
+	if (n > 1) el.appendChild(Object.assign(document.createElement('span'), { className: 'dev', textContent: n + ' open', title: n + ' pages are open on this chat' }));
+	el.hidden = !el.children.length;
 }
 /* quiet, in the header: this session is shared (:remote on), a newer hako is out */
 function renderInd() {
@@ -4429,6 +4774,7 @@ async function loadAgents(force) {
 		agentsNow = { me: j.me || '', route: j.route || '', agents: j.agents };
 	} catch (e) { return; }
 	renderPills();
+	renderPresence();
 	if (/^@/.test(input.value)) renderMenu();
 }
 const otherAgents = () => agentsNow.agents.filter((a) => !a.me);
@@ -4508,6 +4854,7 @@ function syncInput() {
 	input.style.height = 'auto';
 	input.style.height = Math.min(input.scrollHeight, 192) + 'px';
 	renderMenu();
+	syncSend();
 }
 
 /* ---------- the menu panel: folds away, comes back (ctrl+b), remembered here ---------- */
@@ -4536,8 +4883,8 @@ const CLEARING = /^[:/](clear|sessions?\s+clear|session\s+new)\b/i;
 
 form.addEventListener('submit', (e) => {
 	e.preventDefault();
-	if (busy) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	const text = input.value.trim();
+	if (busy && !text) { if (caps.has('stop')) post('/api/stop', ''); return; }
 	if (!text && !attached.length) return;
 	voice.stop();
 	menuShut = null; cmdmenu.hidden = true;
@@ -4549,10 +4896,15 @@ form.addEventListener('submit', (e) => {
 		showSession(codePick).then((still) => { if (still) { wantSlide = true; setBusy(true); post('/api/prompt', text); } });
 		return;
 	}
+	if (busy && CLEARING.test(text)) { flashStatus('stop this turn first'); return; }
 	if (text && hist[hist.length - 1] !== text) { hist.push(text); if (hist.length > 100) hist.shift(); }
 	histAt = -1;
 	input.value = ''; input.style.height = 'auto';
-
+	/* mid-turn a message waits here for the turn; a command goes now (:mode takes at once) */
+	if (busy && !/^[:/]/.test(text)) { queued.push(text); renderQueued(); syncSend(); return; }
+	sendText(text);
+});
+function sendText(text) {
 	if (UNSAFE.test(text)) {
 		const which = text.replace(/^[:/]/, '').trim().toLowerCase().replace(/\s+/g, ' ');
 		if (which === 'theme') openSettings();
@@ -4577,7 +4929,7 @@ form.addEventListener('submit', (e) => {
 		if (CLEARING.test(text)) { wantSlide = false; clearLog(); quietSlash(text); post('/api/reset', ''); setBusy(false); state.session_name = ''; renderChrome(); }
 		else post('/api/slash', text);
 	} else post('/api/prompt', text);
-});
+}
 
 /* ↑/↓ walk what you sent, as in the terminal: only when the caret is on the first
    (↑) or last (↓) line, so moving inside a long draft still works. The draft is kept. */

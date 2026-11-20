@@ -54,6 +54,98 @@ with sync_playwright() as p:
     ck('#probe' not in pg.content(), "the viewport probe is gone")
     ck(pg.evaluate("parseFloat(getComputedStyle(document.querySelector('header')).paddingTop)") >= 26, "home-screen app: the header clears the blur under the status bar")
     pg.close()
+    # 2026-11-17, a day on the phone: a reply's markdown went in after add() scrolled, so once
+    # the chat overflowed it stopped following, and a reconnect rebuilt it at its top.
+    # The page's own event handler, fed a chat: no engine, nothing timed.
+    pg = b.new_page(viewport={'width': 390, 'height': 844}, has_touch=True); pg.goto(U); pg.wait_for_timeout(1000)
+    feed = """(n) => { for (let i = 0; i < n; i++) {
+        esMessage({ data: JSON.stringify({ type: 'message', role: 'user', text: 'question ' + i }) });
+        esMessage({ data: JSON.stringify({ type: 'message', role: 'ai', text: 'Okay, here is the list:\\n\\n* `a`\\n* `b`\\n* `c`\\n\\nWhat next?' }) });
+        esMessage({ data: JSON.stringify({ type: 'done' }) }); } }"""
+    gap = lambda: pg.evaluate("$('log').scrollHeight - $('log').scrollTop - $('log').clientHeight")
+    pg.evaluate(feed, 10); pg.wait_for_timeout(100)
+    tall = pg.evaluate("[$('log').scrollHeight, $('log').clientHeight]")
+    ck(tall[0] > tall[1] + 300 and gap() < 40, "a long chat follows each reply to its end (%d px from the bottom, %d tall in %d)" % (gap(), *tall))
+    pg.evaluate("$('log').scrollTop = 100"); pg.wait_for_timeout(100)
+    pg.evaluate(feed, 1); pg.wait_for_timeout(100)
+    ck(pg.evaluate("$('log').scrollTop") < 400, "scrolled up to read, a new reply leaves the reader where they are")
+    pg.evaluate("clearLog()"); pg.evaluate(feed, 11); pg.wait_for_timeout(100)
+    ck(gap() < 40, "a reconnect (the chat cleared and replayed) rebuilds it at its end, not its top (%d px)" % gap())
+    # 11-18: mid-turn the button only stopped, so nothing could be said until the turn
+    # ended, and :mode auto waited behind the approvals it was for. Posts recorded, not sent.
+    pg.evaluate("""window.__posts = []; window.fetch = (p, o) => { if (o && o.method === "POST") __posts.push([p, o.body]); return Promise.resolve(new Response('{"ok":true}')); };
+        caps.add('stop'); setBusy(true);""")
+    pg.fill('#input', 'and then the tests')
+    ck(pg.inner_text('#send').strip() == 'queue', "mid-turn, something typed makes the button queue, not stop (%r)" % pg.inner_text('#send'))
+    pg.press('#input', 'Enter'); pg.wait_for_timeout(100)
+    ck(pg.is_visible('#queued') and 'and then the tests' in pg.inner_text('#queued') and not pg.input_value('#input')
+       and not pg.evaluate("__posts.length"), "Enter queues it on the page and sends nothing yet")
+    ck(pg.inner_text('#send').strip() == 'stop', "the field empty again, the button stops")
+    pg.fill('#input', ':mode auto'); pg.press('#input', 'Enter'); pg.wait_for_timeout(100)
+    ck(pg.evaluate("JSON.stringify(__posts)") == '[["/api/slash",":mode auto"]]', "a command mid-turn goes now (%s)" % pg.evaluate("JSON.stringify(__posts)"))
+    pg.evaluate("__posts.length = 0; esMessage({ data: JSON.stringify({ type: 'done' }) })"); pg.wait_for_timeout(100)
+    ck(pg.evaluate("JSON.stringify(__posts)") == '[["/api/prompt","and then the tests"]]' and not pg.is_visible('#queued'),
+       "the turn's done sends what was queued (%s)" % pg.evaluate("JSON.stringify(__posts)"))
+    pg.evaluate("__posts.length = 0; caps.add('steer'); setBusy(true)"); pg.fill('#input', 'use tabs'); pg.press('#input', 'Enter')
+    if pg.locator('#queued .go').count(): pg.click('#queued .go')
+    pg.wait_for_timeout(100)
+    ck(pg.evaluate("JSON.stringify(__posts)") == '[["/api/steer","use tabs"]]' and not pg.is_visible('#queued'),
+       "send now goes into the running turn when hako steers (%s)" % pg.evaluate("JSON.stringify(__posts)"))
+    pg.evaluate("__posts.length = 0; esMessage({ data: JSON.stringify({ type: 'done' }) })"); pg.wait_for_timeout(100)
+    ck(pg.evaluate("__posts.length") == 0, "and its done sends nothing more")
+    pg.evaluate("__posts.length = 0; caps.delete('steer'); setBusy(true)"); pg.fill('#input', 'stop and do this'); pg.press('#input', 'Enter')
+    if pg.locator('#queued .go').count(): pg.click('#queued .go')
+    pg.wait_for_timeout(100)
+    ck(pg.evaluate("JSON.stringify(__posts)") == '[["/api/stop",""]]', "without steer, send now stops the turn (%s)" % pg.evaluate("JSON.stringify(__posts)"))
+    pg.evaluate("__posts.length = 0; esMessage({ data: JSON.stringify({ type: 'done' }) })"); pg.wait_for_timeout(100)
+    ck(pg.evaluate("JSON.stringify(__posts)") == '[["/api/prompt","stop and do this"]]', "and its done sends it")
+    # 11-18: a turn's tool calls fold into one row, so the reply reads as the main thing
+    pg.evaluate(r'''clearLog(); const f = (o) => esMessage({ data: JSON.stringify(o) });
+        f({ type: 'message', role: 'user', text: 'look around' });
+        f({ type: 'tool_start', display: 'list_dir .' }); f({ type: 'tool_end', display: '3 entries' }); f({ type: 'tool_result', text: 'a\nb' });
+        f({ type: 'tool_start', display: 'read_file a' }); f({ type: 'tool_end', display: 'error: no such file' });
+        f({ type: 'message', role: 'ai', by: 'sho', text: 'Here:\n\n```sh\nls -la\n```' }); f({ type: 'done' });''')
+    head = pg.inner_text('#log > .work .whead') if pg.locator('#log > .work').count() else ''
+    ck(pg.locator('#log > .work').count() == 1 and not pg.locator('#log > .tool').count()
+       and 'worked' in head and '2 steps' in head and '1 failed' in head, "a turn's tool calls fold into one row (%r)" % head)
+    ck(not pg.is_visible('#log > .work .wbody'), "folded until asked")
+    if pg.locator('#log > .work .whead').count(): pg.click('#log > .work .whead')
+    pg.wait_for_timeout(100)
+    ck(pg.locator('#log > .work .wbody > .tool').count() == 5 and pg.is_visible('#log > .work .wbody'), "and opens to show each step")
+    ck(pg.evaluate("[...$('log').children].map((e) => e.className.split(' ')[0]).join(',')") == 'turn,work,turn',
+       "the reply follows the work, in order (%s)" % pg.evaluate("[...$('log').children].map((e) => e.className).join(' | ')"))
+    ck(pg.locator('.model .codebox > .copy').count() == 1, "a code block in a reply has a copy button")
+    ck('sho' in pg.inner_text('.model .who').lower() and pg.locator('.model .who .av').count() == 1, "a reply is marked with the hako that gave it")
+    pg.evaluate("esMessage({ data: JSON.stringify({ type: 'message', role: 'user', by: 'koi', to: 'sho', text: 'q' }) })")
+    ck(pg.locator('.user.peer').count() == 1 and 'koi' in pg.inner_text('.user.peer .who').lower() and pg.inner_text('#send').strip() == 'send',
+       "a line asked at another hako's pane shows as theirs, and starts no turn here")
+    pg.evaluate("esMessage({ data: JSON.stringify({ type: 'message', role: 'user', text: ':say lunch?' }) }); esMessage({ data: JSON.stringify({ type: 'message', role: 'chat', by: 'koi', text: 'lunch?' }) })")
+    ck(pg.locator('.turn.chat').count() == 1 and 'koi' in pg.inner_text('.turn.chat .who').lower() and ':say' not in pg.inner_text('#log'),
+       "a :say line shows once, as a line between people, not as the command")
+    pg.evaluate("agentsNow = { me: 'sho', route: '', agents: [{ name: 'sho', me: true, state: 'busy' }, { name: 'koi' }] }; state.watching = 3; renderPresence()")
+    ck(pg.locator('#presence .av').count() == 2 and pg.locator('#presence .av.busy').count() == 1 and '3 open' in pg.inner_text('#presence'),
+       "the header shows who is on the chat, who is working, and how many pages are open")
+    pg.evaluate("settings.backdrop = 'stars'; paintBackdrop()")
+    ck(pg.evaluate("$('backdrop').dataset.bg") == 'stars' and pg.evaluate("document.body.classList.contains('grain')"), "a background is drawn, grain on by default")
+    pg.evaluate("settings.grain = false; settings.backdrop = 'image'; paintBackdrop()")
+    ck(pg.evaluate("$('backdrop').dataset.bg") == '' and not pg.evaluate("document.body.classList.contains('grain')"), "an image never picked falls back to plain, and grain turns off")
+    pg.evaluate("settings.grain = true; settings.backdrop = 'none'; saveSettings()")
+    # 11-19: a call that asked first stays one row once answered (a real turn split it in two, the box between)
+    pg.evaluate(r'''window.__posts = []; window.fetch = (p, o) => Promise.resolve(new Response('{"ok":true}'));
+        const f = (o) => esMessage({ data: JSON.stringify(o) }); clearLog(); setBusy(true);
+        f({ type: 'message', role: 'user', text: 'read it' });
+        f({ type: 'tool_start', display: 'read_file main.c' });
+        f({ type: 'tool_request', id: 7, name: 'read_file', subject: 'main.c', kind: 'read' });''')
+    ck(pg.is_visible('#log > .ask .row button.primary'), "the open approval shows in the chat")
+    pg.click('#log > .ask .row button.primary'); pg.wait_for_timeout(50)
+    pg.evaluate(r'''const f = (o) => esMessage({ data: JSON.stringify(o) });
+        f({ type: 'tool_end', display: '12 lines' }); f({ type: 'tool_result', text: 'int main' });
+        f({ type: 'message', role: 'ai', text: 'It prints primes.' }); f({ type: 'done' });''')
+    head = pg.inner_text('#log > .work .whead') if pg.locator('#log > .work').count() else ''
+    ck(pg.locator('#log > .work').count() == 1 and not pg.locator('#log > .ask').count()
+       and pg.locator('#log > .work .wbody .ask.settled').count() == 1 and '1 step' in head,
+       "an answered approval folds into its turn's one row (%d rows, %r)" % (pg.locator('#log > .work').count(), head))
+    pg.close()
     for name, vp in (("desk", {'width': 1280, 'height': 800}), ("phone", {'width': 390, 'height': 844})):
         pg = b.new_page(viewport=vp, has_touch=(name == "phone"))
         errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
@@ -209,7 +301,8 @@ with sync_playwright() as p:
         pg.wait_for_selector('.ask .row button', timeout=20000)
         ck(True, "a tool-approval box appears in ask mode")
         pg.click('.ask .row button.primary')
-        pg.wait_for_selector('.tool.result', timeout=20000)
+        pg.wait_for_selector('.tool.result', state='attached', timeout=20000)
+        pg.click('.work .whead >> nth=-1')            # folded with the turn's other steps: open it
         ck("alpha.txt" in pg.inner_text('.tool.result'), "the tool's OUTPUT is shown, not just its name")
         pg.wait_for_selector('.turn.model li code', timeout=20000)
         ck(pg.locator('.turn.model li code').count() >= 3 and '`' not in pg.inner_text('.turn.model >> nth=-1'),

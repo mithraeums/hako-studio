@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.0-ece7da?style=flat-square&labelColor=14130f" alt="v0.1.0"/>
+  <img src="https://img.shields.io/badge/version-v0.2.1-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-ece7da?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -41,9 +41,25 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/chat-night.png?raw=true"/>
-    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/chat.png?raw=true" alt="a finished turn: the tool chip and the answer in markdown" width="100%"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/chat.png?raw=true" alt="a finished turn: its tool calls folded into one worked row, and the answer in markdown" width="100%"/>
   </picture><br/>
-  <sub><b>code</b>, a session on your computer (CODE): tool calls as chips, replies in markdown</sub>
+  <sub><b>code</b>, a session on your computer (CODE): a turn's tool calls fold into one row, replies in markdown</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/queue-night.png?raw=true"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/queue.png?raw=true" alt="a line typed while the turn runs waits over the composer, with send now and a cross to drop it" width="100%"/>
+  </picture><br/>
+  <sub>type while it works: the line waits for the turn to end, or <b>send now</b> puts it into the turn</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/look-night.png?raw=true"/>
+    <img src="https://github.com/mithraeums/mithraeums.github.io/blob/main/assets/readme-screenshots/hako-studio/look.png?raw=true" alt="the same chat over a background: rays on paper, stars at night" width="100%"/>
+  </picture><br/>
+  <sub>backgrounds, set in the page: rays, stars, dusk or a picture of your own, over a paper grain</sub>
 </p>
 
 <p align="center">
@@ -110,7 +126,19 @@
   reach, so local models and OAuth providers are hidden there rather than offered and broken.
 - **Themes from the one rc.** `terminal` by default (a plain palette that follows your system's
   light or dark), plus the suite's 19 and any custom theme in `~/.hakorc`. With `hako --serve`
-  the page reads the rc; `studio.theme=` gives the page its own.
+  the page reads the rc; `studio.theme=` gives the page its own. Over any theme, a background
+  set in the page (rays, stars, dusk, or a picture of yours, kept in that browser) and a paper
+  grain you can turn off.
+- **Talk while it works.** A line typed mid-turn waits over the composer and goes when the
+  turn ends; **send now** puts it into the running turn, read after the step it is on, the way
+  a person would cut in. `:mode auto` mid-turn takes at once and answers the tool that is
+  waiting, so switching never means clicking through the approvals first.
+- **Turns that read at a glance.** A turn's tool calls fold into one row (`worked · 3 steps`,
+  and what failed), open on a tap; code blocks carry a copy button. Motion is light and goes
+  quiet when the system asks for reduced motion.
+- **More than one of you.** When several hakos share a chat, the header shows who is on it
+  and who is working, each reply carries its author's mark, rows between them show who spoke
+  to whom, and `:say` lines from people read as chat.
 - **Read aloud.** A speaker on every reply, or `:voice on` to hear each one. Only the device's own
   voices are used, so the text never leaves it.
 - **Your code sessions, from anywhere** *(invite beta)*. Run `:remote on` in a terminal hako
@@ -287,11 +315,12 @@ then answers `503` and says which of the two to use.
 |---|---|
 | **menu** | HAKO or CODE at the top with the chat/code switch; new, search, files, settings; your recent sessions; the account row at the foot. Fold it away with the button or cmd/ctrl+b; it remembers |
 | **landing** | a greeting for the time of day, the composer under it and the newest files in the folder; the composer moves down once the chat starts. Code shows your code sessions to pick from |
-| **composer** | type `:` or `/` for the command menu (↑↓, tab, enter; esc closes only the menu). Chips under it show the folder, the model and the mode |
+| **composer** | type `:` or `/` for the command menu (↑↓, tab, enter; esc closes only the menu). Chips under it show the folder, the model and the mode; lines typed mid-turn wait over it with `send now` and `×` |
+| **work row** | one per turn's tool calls: `worked · N steps`, failures counted, folded until you open it |
 | **session row** | open it with its whole transcript; `✎` renames it (a code session's name reaches the terminal too); `×` deletes it |
 | **approval box** | `allow once` · `deny` · `always`; answered boxes stay settled across a reload |
 | **files** | browse folders and files; tap one to put it in your message; **add from device** uploads from the phone's Files/Photos into the open project |
-| **settings** | theme · read aloud · thinking indicator · extra folders to search for model weights · forget local settings |
+| **settings** | theme · background · paper grain · read aloud · thinking indicator · extra folders to search for model weights · forget local settings |
 
 Uploads land in the open project under a sanitized basename, never overwrite (collisions become
 `-1`, `-2`), cap at 128 MB, stream to disk, and announce themselves in the transcript so the agent
@@ -305,7 +334,8 @@ Commands are the CLI's: `:` runs hako itself (`:trust`, `:usage`, `:sessions`, `
 the model's own questions arrive as a choice box: tap an option and the agent carries on.
 
 On a desktop Enter sends and Shift+Enter adds a line; on a touch device Enter is a newline and
-`send` sends. While a turn is running that button becomes `stop`. Under 720px the menu is a
+`send` sends. While a turn is running that button becomes `stop`, or `queue` once you type:
+a command (`:mode`, `:model`) still goes at once. Under 720px the menu is a
 drawer, and the UI asks the agent what it supports before offering it, so an older `hako` simply
 shows fewer buttons.
 
