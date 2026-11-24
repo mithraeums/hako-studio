@@ -4,7 +4,7 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
-## [Unreleased]
+## [v0.2.2] - 2026-11-24
 
 ### added
 - a usage ring in the header, Claude's way: the fullest limit your provider reports, the week when it is nearly gone and the 5 hours otherwise, in the warning color past 80%. a tap lists every window with its bar and when it resets, and asks again; a prepaid key shows its balance instead. on by default, a switch in settings (hako). needs hako with `limits` (v0.4.4); the hosted page shows it where the provider lets a browser read its headers

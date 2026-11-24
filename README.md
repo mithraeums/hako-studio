@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.1-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/>
+  <img src="https://img.shields.io/badge/version-v0.2.2-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.2"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-ece7da?style=flat-square&labelColor=14130f" alt="no dependencies"/>
