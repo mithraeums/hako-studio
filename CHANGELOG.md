@@ -4,6 +4,16 @@ All notable changes to hako studio (the browser workspace). Format: [Keep a Chan
 The page ships two ways: hosted at hako.mithraeum.studio (built nightly from hako-code `main`) and
 embedded in `hako --serve`. The agent itself is hako-code; its changes are in that repo's CHANGELOG.
 
+## [Unreleased]
+
+### added
+- a usage ring in the header, Claude's way: the fullest limit your provider reports, the week when it is nearly gone and the 5 hours otherwise, in the warning color past 80%. a tap lists every window with its bar and when it resets, and asks again; a prepaid key shows its balance instead. on by default, a switch in settings (hako). needs hako with `limits` (v0.4.4); the hosted page shows it where the provider lets a browser read its headers
+- a bar along the bottom on a phone, where a thumb goes: chat and code (signed in), recents, files and you; on a computer's own page new takes the place of chat and code. it steps aside while the keyboard is up, and the menu still has everything
+- settings in three tabs (look, hako, your data) at one height: themes are a grid of small previews in their own colors (four across on a phone), light or dark, a background and the thinking indicator are one line of choices each, paper grain and reading aloud are switches. the look tab fits a phone screen without a scroll
+
+### fixed
+- the menu on a phone let the page show through it (the see-through panel meant for backgrounds); it is solid as a drawer
+
 ## [v0.2.1] - 2026-11-19
 
 ### added

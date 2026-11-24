@@ -190,19 +190,24 @@ export function hakoImports({ memory, storage, log }) {
 	// platform already offers synchronous versions of both halves. OPFS has
 	// createSyncAccessHandle() for files, and XMLHttpRequest is still allowed to
 	// be synchronous off the main thread. The worker blocks; the page does not.
+	let replyHeaders = '';   /* the last reply's, for the plan limits they carry */
 	const env = {
 		hkjs_http_fetch(methodPtr, urlPtr, headersPtr, bodyPtr, stream) {
 			// The key is the user's and goes straight to the provider: no server
 			// of ours is in the path, by design.
-			const text = storage.http({
+			const req = {
 				method: readStr(methodPtr),
 				url: readStr(urlPtr),
 				headers: parseHeaders(readStr(headersPtr)),
 				body: readStr(bodyPtr),
 				stream,
-			});
+			};
+			const text = storage.http(req);
+			replyHeaders = req.replyHeaders || '';
 			return text === null ? 0 : writeStr(text);
 		},
+		/* only what the provider's CORS exposes: often nothing, and then no ring */
+		hkjs_http_headers: () => writeStr(replyHeaders),
 		hkjs_fs_read(pathPtr, outPtrPtr, outLenPtr) {
 			const got = storage.read(norm(readStr(pathPtr)));
 			if (got === null || got === undefined) return -1;
@@ -479,12 +484,14 @@ export async function opfsStorage() {
 	return {
 		// Synchronous XHR: legal off the main thread, and the only way to hand a
 		// blocking C loop an HTTP response without rewriting the loop.
-		http({ method, url, headers, body }) {
+		http(req) {
+			const { method, url, headers, body } = req;
 			try {
 				const x = new XMLHttpRequest();
 				x.open(method || 'GET', url, false);
 				for (const k in headers) x.setRequestHeader(k, headers[k]);
 				x.send(body || null);
+				req.replyHeaders = x.getAllResponseHeaders();
 				return x.responseText;
 			} catch (e) {
 				// A network error must not read as an empty response — that

@@ -242,6 +242,26 @@
 	header .dot.on { color: var(--phos); }
 	header .meta { color: var(--dim); font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 	header .meta b { color: var(--bone); font-weight: 400; }
+	/* the plan's fullest window, as a ring (Claude's): the week when it is nearly gone, the 5 hours otherwise */
+	.usage { position: relative; flex: none; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--bone); }
+	.usage svg { width: 26px; height: 26px; transform: rotate(-90deg); display: block; }
+	.usage circle { fill: none; stroke-width: 2.4; }
+	.usage .track { stroke: var(--line); }
+	.usage .fill { stroke: var(--bone); stroke-linecap: round; transition: stroke-dasharray .4s ease; }
+	.usage.warn .fill { stroke: var(--gold); }
+	.usage.full .fill { stroke: var(--err); }
+	.usage .n { position: absolute; inset: 0; display: grid; place-items: center; font-size: 9px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+	.usage.text { width: auto; height: auto; border: 1px solid var(--line); border-radius: 99px; padding: .05rem .5rem; font-size: 11px; color: var(--dim); }
+	@media (prefers-reduced-motion: reduce) { .usage .fill { transition: none; } }
+	.lim { display: grid; grid-template-columns: 6.5rem 1fr auto; gap: .35rem .7rem; align-items: center; font-size: 13px; }
+	.lim .nm { color: var(--bone); }
+	.lim .bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+	.lim .bar i { display: block; height: 100%; background: var(--bone); border-radius: 99px; }
+	.lim .bar i.warn { background: var(--gold); }
+	.lim .bar i.full { background: var(--err); }
+	.lim .pc { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+	.lim .head { color: var(--gold); }
+	.limnote { margin-top: .8rem; color: var(--dim); font-size: 12px; }
 	.ind { display: flex; gap: .35rem; }
 	.ind > * {
 		border: 1px solid var(--line); border-radius: 99px; padding: .05rem .5rem; font-size: 11px;
@@ -571,6 +591,41 @@
 	@media (hover: hover) { .opt:not(.sel):hover { background: var(--bg); } }
 	.opt .tag { color: var(--phos); font-size: 11px; }
 	.opt .sub { color: var(--faint); font-size: 11px; }
+	/* settings, compact: themes as a grid of previews, choices on one line, switches */
+	.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: .4rem; padding: .15rem .55rem .45rem; }
+	.tile {
+		display: flex; flex-direction: column; gap: .3rem; min-width: 0; min-height: 0; padding: .3rem; text-align: left;
+		border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--phos); font: inherit; font-size: 11.5px;
+	}
+	.tile .pv { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 7px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(128,128,128,.25); }
+	.tile .pv b { font: 600 14px/1 var(--serif, Georgia, serif); margin-right: auto; }
+	.tile .pv .swatch { margin: 0; width: 8px; height: 8px; border-radius: 50%; }
+	.tile .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 .1rem; }
+	.tile.sel { border-color: var(--gold-dim); background: var(--panel-2); color: var(--gold); }
+	.seg { display: flex; flex-wrap: wrap; gap: .3rem; padding: .15rem .55rem .45rem; }
+	.seg button {
+		flex: 1 1 0; min-width: 3.2rem; min-height: 34px; padding: .3rem .5rem; border: 1px solid var(--line); border-radius: 9px;
+		background: none; color: var(--phos); font: inherit; font-size: 12px; white-space: nowrap;
+	}
+	.seg button.sel { border-color: var(--gold-dim); background: var(--panel-2); color: var(--gold); }
+	.modal.settings { height: min(84vh, 760px); }
+	.modal.settings .body { flex: 1; }
+	.seg.stabs { position: sticky; top: 0; z-index: 1; background: var(--panel); margin: 0 0 .2rem; padding: .1rem .55rem .5rem; border-bottom: 1px solid var(--line); }
+	@media (max-width: 720px) {
+		.tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; }
+		.tile { padding: .22rem; font-size: 10.5px; gap: .22rem; border-radius: 9px; }
+		.tile .pv { height: 26px; padding: 0 5px; gap: 3px; }
+		.tile .pv b { font-size: 12px; }
+		.tile .pv .swatch { width: 6px; height: 6px; }
+	}
+	.opt.swrow { display: flex; align-items: center; gap: .8rem; white-space: normal; }
+	.swrow .words { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+	.swrow .sub { font-size: 11px; color: var(--faint); }
+	.swrow .sw { flex: none; width: 34px; height: 20px; border-radius: 10px; background: var(--line-2); position: relative; transition: background .15s; }
+	.swrow .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); transition: transform .15s; }
+	.swrow.on .sw { background: var(--gold); }
+	.swrow.on .sw::after { transform: translateX(14px); }
+	@media (hover: hover) { .tile:not(.sel):hover, .seg button:not(.sel):hover { border-color: var(--line-2); color: var(--bone); } }
 	.grouplabel {
 		font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
 		color: var(--faint); padding: .55rem .55rem .2rem;
@@ -617,13 +672,33 @@
 		aside { transition: margin-left .18s ease, visibility 0s; }
 		body.side-off aside { margin-left: calc(-1 * var(--sidebar) - 1px); visibility: hidden; transition: margin-left .18s ease, visibility 0s .18s; }
 	}
+	.tabbar { display: none; }
 	/* a phone: the menu is a drawer over the page */
 	@media (max-width: 720px) {
+		/* the bar along the bottom: it takes the home-bar inset, so the composer above it does not */
+		.tabbar {
+			display: flex; flex: none; gap: .15rem; border-top: 1px solid var(--line); background: var(--bg);
+			padding: .2rem max(.35rem, env(safe-area-inset-right)) max(.25rem, env(safe-area-inset-bottom)) max(.35rem, env(safe-area-inset-left));
+		}
+		.tabbar button {
+			flex: 1 1 0; min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+			border: 0; border-radius: 10px; background: none; color: var(--dim); padding: .25rem 0 .1rem;
+			font-size: 10.5px; letter-spacing: .05em; line-height: 1;
+		}
+		.tabbar button[hidden] { display: none; }
+		.tabbar svg.i { width: 22px; height: 22px; }
+		.tabbar .avatar { width: 22px; height: 22px; font-size: 11px; }
+		.tabbar button.on, body.nav #tab-recents { color: var(--bone); }
+		.tabbar button.on svg.i { stroke-width: 2; }
+		.tabbar button:active { background: var(--panel); }
+		body:not(.kb) form { padding-bottom: .4rem; }
+		body.kb .tabbar { display: none; }      /* the keyboard is up: the composer sits on it alone */
 		aside {
 			position: fixed; inset: 0 auto 0 0; z-index: 30; width: min(86vw, 320px);
 			transform: translateX(-100%); transition: transform .18s ease, visibility 0s .18s; visibility: hidden;
 			padding-left: env(safe-area-inset-left);
 			padding-bottom: env(safe-area-inset-bottom);
+			background: var(--panel);          /* over the page, the see-through panel let the chat show through it */
 		}
 		body.nav aside { transform: none; visibility: visible; transition: transform .18s ease; box-shadow: 0 0 40px rgba(0,0,0,.4); }
 		body.nav::after {                      /* tap-anywhere-else closes the drawer */
@@ -690,6 +765,7 @@
 		<span class="title" id="title"></span>
 		<span class="spacer"></span>
 		<span class="presence" id="presence" hidden></span>
+		<button class="usage" id="usage" type="button" hidden></button>
 		<span class="ind" id="ind"></span>
 		<span class="dot" id="dot" aria-hidden="true">●</span>
 		<span class="meta" id="meta">connecting…</span>
@@ -720,6 +796,15 @@
 			<div class="cards" id="files"></div>
 		</div>
 	</div>
+	<!-- a phone: the places a thumb goes, along the bottom (the menu still has them all) -->
+	<nav class="tabbar" id="tabbar" aria-label="sections">
+		<button type="button" id="tab-chat" hidden><svg class="i" viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/></svg><span>chat</span></button>
+		<button type="button" id="tab-code" hidden><svg class="i" viewBox="0 0 24 24"><path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4M13.3 5.5l-2.6 13"/></svg><span>code</span></button>
+		<button type="button" id="tab-new" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>new</span></button>
+		<button type="button" id="tab-recents"><svg class="i" viewBox="0 0 24 24"><path d="M4.5 6.5h15M4.5 12h15M4.5 17.5h9"/></svg><span>recents</span></button>
+		<button type="button" id="tab-files"><svg class="i" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5"/></svg><span>files</span></button>
+		<button type="button" id="tab-you"><span class="avatar"></span><span>you</span></button>
+	</nav>
 </main>
 
 <script>
@@ -1566,6 +1651,7 @@ function renderUser() {
 	b.append(avatarEl(), who);
 	b.addEventListener('click', (e) => { e.stopPropagation(); openUserMenu(b); });
 	el.appendChild(b);
+	renderTabs();      /* a new picture or name shows in the bottom bar too */
 }
 function openUserMenu(anchor) {
 	const go = (fn) => () => { closeNav(); fn(); };
@@ -1768,7 +1854,7 @@ window.hakoAccount = {
 			if (this.show) this.show(!!REMOTE_ID || $('mode-code').classList.contains('on'));
 			m.body.textContent = ''; m.foot.textContent = '';
 			m.title.textContent = title || 'account';
-			$('modes').hidden = false;
+			$('modes').hidden = false; renderTabs();
 			if (linkTo) {
 				try { await linkComputer(linkTo[1], linkTo[2]); say('linked. its sessions now show under code on every device signed in to your account. you can close this tab.'); }
 				catch (e) { fail(e); }
@@ -1954,7 +2040,7 @@ window.hakoAccount = {
 			if (!relay.acct || !(await kvGet('k'))) { closeNav(); return this.open(); }
 			await show(true);
 		});
-		$('modes').hidden = false;
+		$('modes').hidden = false; renderTabs();
 		this.renderAcct();
 		if (await kvGet('acct')) relay.signIn().then(async () => { try { await settleKey(); } catch (e) {} this.renderAcct(); }, () => {});
 		if (HASH === '#signin' || INVITE) history.replaceState(null, '', location.pathname);
@@ -2435,7 +2521,7 @@ const SETTINGS_KEY = 'hako.studio.settings';
    auto (the system's) for the two themes that have both; side_off: the menu folded
    away; pins/archived: session ids; name/avatar: the profile, on this device only */
 const defaults = { theme: 'mithraeum', theme_picked: false, appearance: 'auto', modelPaths: [], consented: false, spinner: 'braille',
-                   side_off: false, voice: false, pins: [], archived: [], name: '', avatar: '', backdrop: 'none', grain: true };
+                   side_off: false, voice: false, pins: [], archived: [], name: '', avatar: '', backdrop: 'none', grain: true, usage_ring: true };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) {}
 /* Before 10-29 every page saved its theme on load, picked or not, so washi (an old
@@ -2568,7 +2654,7 @@ if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', () => {
 let busy = false;
 let state = { provider: '', model: '', turns: 0, session: '', dir: '', version: '',
               home: '', places: [], folder: '', root: '',
-              session_name: '', theme: '', theme_slots: null, commands: null, remote: false, update: null, voice: 0, mode: '', yolo: 0 };
+              session_name: '', theme: '', theme_slots: null, commands: null, remote: false, update: null, voice: 0, mode: '', yolo: 0, limits: null };
 const STATE0 = JSON.stringify(state);    /* a session newly shown starts from here */
 let agentsNow = { me: '', route: '', agents: [] }, agentsAt = 0;   /* the hakos on the shown session */
 const askBoxes = new Map();
@@ -2593,6 +2679,7 @@ function takeState(j) {
 	if (Array.isArray(j.commands)) state.commands = j.commands;
 	if ('remote' in j) state.remote = !!j.remote;
 	if ('update' in j) state.update = j.update && j.update.latest ? j.update : null;
+	if ('limits' in j) state.limits = j.limits && Array.isArray(j.limits.windows) ? j.limits : null;
 	if ('voice' in j) state.voice = +j.voice || 0;
 	if ('voice_rate' in j) state.voice_rate = +j.voice_rate || 0;
 	if ('mode' in j) state.mode = j.mode || '';
@@ -3029,6 +3116,37 @@ function groupLabel(text) {
 	const d = document.createElement('div');
 	d.className = 'grouplabel'; d.textContent = text;
 	return d;
+}
+/* One line of choices, one of them on: light or dark, a background, an indicator.
+   `keep` leaves the mark to the caller (a choice that can be cancelled, a picture). */
+function segRow(opts, cur, onPick, keep) {
+	const d = document.createElement('div');
+	d.className = 'seg'; d.setAttribute('role', 'radiogroup');
+	d.mark = (k) => { for (const b of d.children) { b.classList.toggle('sel', b.dataset.k === k); b.setAttribute('aria-checked', b.dataset.k === k); } };
+	for (const [k, label, title] of opts) {
+		const b = document.createElement('button');
+		b.type = 'button'; b.dataset.k = k; b.textContent = label; b.setAttribute('role', 'radio');
+		if (title) { b.title = title; b.setAttribute('aria-label', title); }
+		b.addEventListener('click', () => { onPick(k); if (!keep || k !== 'image') d.mark(k); });
+		d.appendChild(b);
+	}
+	d.mark(cur);
+	return d;
+}
+/* A setting that is on or off: its words, and a switch at the end of the row. */
+function switchRow(label, sub, on, onFlip) {
+	const b = document.createElement('button');
+	b.type = 'button'; b.className = 'opt swrow'; b.setAttribute('role', 'switch');
+	const words = document.createElement('span');
+	words.className = 'words';
+	words.append(document.createTextNode(label));
+	if (sub) words.append(Object.assign(document.createElement('span'), { className: 'sub', textContent: sub }));
+	const sw = Object.assign(document.createElement('span'), { className: 'sw' });
+	b.append(words, sw);
+	const set = (v) => { on = v; b.classList.toggle('on', v); b.setAttribute('aria-checked', v); };
+	set(!!on);
+	b.addEventListener('click', () => { set(!on); onFlip(on); });
+	return b;
 }
 function mb(label, cls, fn) {
 	const b = document.createElement('button');
@@ -3755,109 +3873,106 @@ async function openBrowser() {
 }
 
 /* ---------- settings ---------- */
+let settingsTab = 'look';
 function openSettings() {
 	const m = modal('settings');
+	m.box.classList.add('settings');      /* one height for every tab, so switching never jumps */
+	/* three tabs, so nothing needs a long scroll: how it looks, the agent, what is kept */
+	const panes = { look: document.createElement('div'), hako: document.createElement('div'), data: document.createElement('div') };
+	m.body.appendChild(segRow([['look', 'look'], ['hako', 'hako'], ['data', 'your data']], settingsTab, (k) => {
+		settingsTab = k;
+		for (const [n, el] of Object.entries(panes)) el.hidden = n !== k;
+		m.body.scrollTop = 0;
+	}));
+	m.body.lastChild.classList.add('stabs');
+	for (const [n, el] of Object.entries(panes)) { el.className = 'spane'; el.dataset.pane = n; el.hidden = n !== settingsTab; m.body.appendChild(el); }
+	let pane = panes.hako;
 
-	m.body.appendChild(groupLabel('model'));
-	m.body.appendChild(optionRow(state.model || '(none)', 'change', '', () => {
+	pane.appendChild(groupLabel('model'));
+	pane.appendChild(optionRow(state.model || '(none)', 'change', '', () => {
 		m.close(); openModelPicker();
 	}));
-	m.body.appendChild(optionRow(state.provider || '(none)', 'provider', '', () => {
+	pane.appendChild(optionRow(state.provider || '(none)', 'provider', '', () => {
 		m.close(); openProviderPicker();
 	}));
 
+	pane = panes.look;
 	/* Tapping through themes previews them; closing settings keeps the last one,
 	   says so in the status line, and (under --serve) keeps the CLI in step. */
-	m.body.appendChild(groupLabel('theme'));
-	const themeWas = themeShown, themeRows = [];
+	pane.appendChild(groupLabel('theme'));
+	const themeWas = themeShown;
 	m.onclose = () => {
 		if (themeShown === themeWas) return;
 		if (!HAKO_WASM_MODE) post('/api/theme', settings.theme);
 		flashStatus('theme: ' + settings.theme);
 	};
-	/* mithraeum first (the default), terminal, then the presets, then the rc's own theme if it is a custom one */
+	/* mithraeum first (the default), terminal, then the presets, then the rc's own theme if it is a custom one;
+	   a grid of small previews, each in its own colors, so twenty fit on a phone's screen */
 	const names = themeNames();
 	if (state.theme && !names.includes(state.theme) && state.theme_slots) names.push(state.theme);
+	const tiles = document.createElement('div');
+	tiles.className = 'tiles';
 	names.forEach((name) => {
 		const t = themeVars(name, name === state.theme ? state.theme_slots : null);
-		const b = optionRow(name, name === 'mithraeum' ? 'paper by day, night in the dark' : name === 'terminal' ? 'plain black and white' : '', '', () => {
+		const b = document.createElement('button');
+		b.type = 'button'; b.className = 'tile' + (themeShown === name ? ' sel' : ''); b.dataset.theme = name;
+		b.title = name === 'mithraeum' ? 'paper by day, night in the dark' : name === 'terminal' ? 'plain black and white' : name;
+		const pv = document.createElement('span');
+		pv.className = 'pv'; pv.style.background = t.bg; pv.style.color = t.bone;
+		pv.append(Object.assign(document.createElement('b'), { textContent: 'Aa' }));
+		for (const k of ['gold', 'phos']) { const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = t[k]; pv.appendChild(sw); }
+		b.append(pv, Object.assign(document.createElement('span'), { className: 'nm', textContent: name }));
+		b.addEventListener('click', () => {
 			applyTheme(name, true);
 			if (name === state.theme && state.theme_slots) paintTheme(name, state.theme_slots);
-			for (const [n, row, label] of themeRows) {
-				row.classList.toggle('sel', n === name);
-				label.nodeValue = (n === name ? '\u25ce ' : '  ') + n;
-			}
-		}, themeShown === name);
-		themeRows.push([name, b, b.firstChild]);
-		['bg', 'gold', 'phos', 'bone'].reverse().forEach((k) => {
-			const sw = document.createElement('span');
-			sw.className = 'swatch';
-			sw.style.background = t[k];
-			b.insertBefore(sw, b.firstChild);
+			for (const x of tiles.children) x.classList.toggle('sel', x === b);
 		});
-		m.body.appendChild(b);
+		tiles.appendChild(b);
 	});
+	pane.appendChild(tiles);
 	/* light, dark or the system's, for mithraeum and terminal (the rest have one look) */
-	m.body.appendChild(groupLabel('light or dark'));
-	const looks = [];
-	[['auto', 'follows this device'], ['light', ''], ['dark', '']].forEach(([a, sub]) => {
-		const r = optionRow(a, sub, '', () => {
-			settings.appearance = a; saveSettings();
-			const [n, sl] = effectiveTheme(); paintTheme(n, sl);
-			for (const [x, row] of looks) { row.classList.toggle('sel', x === a); row.firstChild.nodeValue = (x === a ? '\u25ce ' : '  ') + x; }
-		}, settings.appearance === a);
-		looks.push([a, r]);
-		m.body.appendChild(r);
-	});
-	m.body.appendChild(groupLabel('background'));
-	const bds = [];
-	const markBd = () => { for (const [k, row] of bds) { const on = k === (settings.backdrop || 'none'); row.classList.toggle('sel', on); row.firstChild.nodeValue = (on ? '\u25ce ' : '  ') + row.dataset.label; } };
-	BACKDROPS.forEach(([k, label, sub]) => {
-		const r = optionRow(label, sub, '', () => {
-			if (k === 'image') return pickBackdropImage(markBd);
-			settings.backdrop = k; saveSettings(); paintBackdrop(); markBd();
-		}, (settings.backdrop || 'none') === k);
-		r.dataset.label = label;
-		bds.push([k, r]);
-		m.body.appendChild(r);
-	});
-	const gr = optionRow(settings.grain !== false ? 'paper grain: on' : 'paper grain: off', 'a faint texture under everything', '', () => {
-		settings.grain = settings.grain === false; saveSettings(); paintBackdrop();
-		gr.firstChild.nodeValue = (settings.grain ? '\u25ce ' : '  ') + (settings.grain ? 'paper grain: on' : 'paper grain: off');
-		gr.classList.toggle('sel', settings.grain);
-	}, settings.grain !== false);
-	m.body.appendChild(gr);
+	pane.appendChild(groupLabel('light or dark'));
+	pane.appendChild(segRow([['auto', 'auto', 'follows this device'], ['light', 'light'], ['dark', 'dark']], settings.appearance || 'auto', (a) => {
+		settings.appearance = a; saveSettings();
+		const [n, sl] = effectiveTheme(); paintTheme(n, sl);
+	}));
+	pane.appendChild(groupLabel('background'));
+	const bdRow = segRow(BACKDROPS.map(([k, label, sub]) => [k, k === 'image' ? 'image' : label, sub]), settings.backdrop || 'none', (k) => {
+		if (k === 'image') return pickBackdropImage(() => bdRow.mark(settings.backdrop || 'none'));
+		settings.backdrop = k; saveSettings(); paintBackdrop();
+	}, true);
+	pane.appendChild(bdRow);
+	pane.appendChild(switchRow('paper grain', 'a faint texture under everything', settings.grain !== false, (on) => {
+		settings.grain = on; saveSettings(); paintBackdrop();
+	}));
 
+	pane = panes.hako;
+	pane.appendChild(groupLabel('plan usage'));
+	pane.appendChild(switchRow('usage ring', 'the fullest limit your provider reports, in the header', settings.usage_ring !== false, (on) => {
+		settings.usage_ring = on; saveSettings(); renderUsage();
+	}));
 	/* Read aloud: the device's own voices (speechSynthesis), nothing leaves it. */
 	if (voice.ok) {
-		m.body.appendChild(groupLabel('voice'));
+		pane.appendChild(groupLabel('replies'));
 		const rc = state.voice === 1;
-		m.body.appendChild(optionRow(settings.voice || rc ? 'read replies aloud: on' : 'read replies aloud: off',
-			rc ? 'on in your .hakorc (voice=1)' : 'uses this device\u2019s own voices; nothing is sent anywhere', '', () => {
-				settings.voice = !settings.voice; saveSettings(); voice.stop();
-				m.close(); openSettings();
-			}, settings.voice || rc));
+		pane.appendChild(switchRow('read replies aloud', rc ? 'on in your .hakorc (voice=1)' : 'this device\u2019s own voices; nothing is sent anywhere',
+			!!(settings.voice || rc), (on) => { settings.voice = on; saveSettings(); voice.stop(); }));
 	}
 
-	m.body.appendChild(groupLabel('thinking indicator'));
-	Object.keys(SPINNERS).forEach((name) => {
-		const f = SPINNERS[name];
-		m.body.appendChild(optionRow(name, f ? f.slice(0, 5).join(' ') : 'no animation', '', () => {
-			settings.spinner = name; saveSettings();
-			m.close(); openSettings();
-		}, settings.spinner === name));
-	});
+	pane.appendChild(groupLabel('thinking indicator'));
+	pane.appendChild(segRow(Object.keys(SPINNERS).map((name) => [name, { braille: '\u2839', dots: '\u00b7\u00b7\u00b7', bar: '\u2585', moon: '\u25d0', arc: '\u25dc' }[name] || name, name]),
+		settings.spinner, (name) => { settings.spinner = name; saveSettings(); }));
 
 	/* The browser build has no engine and no disk to search: only --serve can use this. */
 	if (!isWasmNow()) {
-	m.body.appendChild(groupLabel('where to look for model weights'));
+	pane.appendChild(groupLabel('where to look for model weights'));
 	const note = document.createElement('div');
 	note.className = 'note';
 	note.innerHTML = '<code>~/.hako/models</code> and <code>~/Downloads</code> are always searched. ' +
 	                 'Add folders here — a weight found elsewhere is <b>symlinked</b> into place, never copied or moved.';
-	m.body.appendChild(note);
+	pane.appendChild(note);
 	settings.modelPaths.forEach((p, i) => {
-		m.body.appendChild(optionRow(p, '', 'remove', () => {
+		pane.appendChild(optionRow(p, '', 'remove', () => {
 			settings.modelPaths.splice(i, 1); saveSettings(); m.close(); openSettings();
 		}));
 	});
@@ -3871,26 +3986,27 @@ function openSettings() {
 		}
 	});
 	addWrap.appendChild(addInp);
-	m.body.appendChild(addWrap);
+	pane.appendChild(addWrap);
 	}
 
 	/* hako on a computer: start this folder over (fresh session state, same agent) */
 	if (!isWasmNow() && caps.has('open')) {
-		m.body.appendChild(groupLabel('this folder'));
-		m.body.appendChild(optionRow('reload this folder', 'fresh session state, same agent', '', async () => {
+		pane.appendChild(groupLabel('this folder'));
+		pane.appendChild(optionRow('reload this folder', 'fresh session state, same agent', '', async () => {
 			m.close(); clearLog(); add('turn system', '', 'reloading this folder\u2026');
 			await post('/api/restart', ''); setBusy(false);
 		}));
 	}
 
-	m.body.appendChild(groupLabel('your data'));
+	pane = panes.data;
+	pane.appendChild(groupLabel('your data'));
 	const priv = document.createElement('div');
 	priv.className = 'note';
 	priv.innerHTML = 'These settings live in this browser’s local storage, on this device. ' +
 	                 'Conversations live in <code>~/.hako/projects/</code> on the machine running the agent. ' +
 	                 'We keep nothing — there is no account and no server-side copy.';
-	m.body.appendChild(priv);
-	m.body.appendChild(optionRow('forget settings on this device', '', '', () => {
+	pane.appendChild(priv);
+	pane.appendChild(optionRow('forget settings on this device', '', '', () => {
 		try { localStorage.removeItem(SETTINGS_KEY); } catch (e) {}
 		settings = Object.assign({}, defaults);
 		const [n, sl] = effectiveTheme(); paintTheme(n, sl);
@@ -4333,6 +4449,9 @@ const esMessage = (ev) => {
 			break;
 		case 'tool_request': askApproval(m); break;
 		case 'choice_request': askChoice(m); break;
+		case 'limits':                      /* the plan's usage, new after a call */
+			takeState({ limits: m.limits });
+			break;
 		case 'state':                       /* a menu pick: the status line, never the chat */
 			if ('provider' in m) state.provider = m.provider || '';
 			if ('model' in m) state.model = m.model || '';
@@ -4466,8 +4585,110 @@ function renderChrome() {
 	const t = $('title');
 	if (t) t.textContent = landing ? '' : currentTitle();
 	renderInd();
+	renderUsage();
 	renderPills();
 	renderPresence();
+	renderTabs();
+}
+/* ---------- plan usage: what the provider says is left ----------
+   hako reads it from each reply (and the usage endpoints that exist) and sends
+   the windows with the state; the headline is the fullest. Off in settings. */
+const limPct = (w) => (w.reset > 0 && w.reset * 1000 <= Date.now()) ? 0 : Math.max(0, Math.min(100, +w.pct || 0));
+const limTone = (p) => p >= 95 ? 'full' : p >= 80 ? 'warn' : '';
+function limIn(reset) {
+	const s = Math.round(reset - Date.now() / 1000);
+	if (!(reset > 0) || s <= 0) return '';
+	if (s >= 86400) return Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h';
+	if (s >= 3600) return Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm';
+	return s >= 60 ? Math.floor(s / 60) + 'm' : s + 's';
+}
+/* the headline now: hako's pick, unless a reset passed since it said */
+function limMain(L) {
+	const w = L.windows;
+	let i = w[L.main] ? L.main : -1;
+	if (i >= 0 && limPct(w[i]) === 0 && w[i].reset > 0 && w[i].reset * 1000 <= Date.now())
+		for (let k = 0; k < w.length; k++) if (i < 0 || limPct(w[k]) > limPct(w[i])) i = k;
+	return i;
+}
+function renderUsage() {
+	const el = $('usage');
+	if (!el) return;
+	const L = state.limits;
+	const i = L ? limMain(L) : -1;
+	el.hidden = settings.usage_ring === false || !L || (i < 0 && !L.note);
+	if (el.hidden) return;
+	el.textContent = '';
+	el.className = 'usage';
+	el.onclick = openUsage;
+	if (i < 0) {                       /* a balance, and nothing else */
+		el.classList.add('text');
+		el.textContent = L.note;
+		el.title = el.ariaLabel = L.note + ' · tap for more';
+		return;
+	}
+	const w = L.windows[i], p = limPct(w), r = 10.5, c = 2 * Math.PI * r;
+	const t = limTone(p);
+	if (t) el.classList.add(t);
+	el.innerHTML = '<svg viewBox="0 0 26 26" aria-hidden="true"><circle class="track" cx="13" cy="13" r="' + r + '"/>' +
+		'<circle class="fill" cx="13" cy="13" r="' + r + '" stroke-dasharray="' + (c * p / 100).toFixed(2) + ' ' + c.toFixed(2) + '"/></svg>';
+	el.appendChild(Object.assign(document.createElement('span'), { className: 'n', textContent: String(p) }));
+	const inT = limIn(w.reset);
+	el.title = el.ariaLabel = w.name + ': ' + p + '% used' + (inT ? ', resets in ' + inT : '') + ' · tap for every limit';
+}
+function openUsage() {
+	const m = modal('usage');
+	const draw = () => {
+		m.body.textContent = '';
+		const Lnow = state.limits;
+		if (!Lnow) { m.body.appendChild(Object.assign(document.createElement('div'), { className: 'note', textContent: 'nothing reported yet' })); return; }
+		const head = limMain(Lnow);
+		const g = document.createElement('div');
+		g.className = 'lim';
+		const order = Lnow.windows.map((w, k) => k).sort((a, b) => (a === head ? -1 : b === head ? 1 : limPct(Lnow.windows[b]) - limPct(Lnow.windows[a])));
+		for (const k of order) {
+			const w = Lnow.windows[k], p = limPct(w), inT = limIn(w.reset);
+			const nm = Object.assign(document.createElement('span'), { className: 'nm' + (k === head ? ' head' : ''), textContent: w.name });
+			const bar = document.createElement('span');
+			bar.className = 'bar';
+			const fill = document.createElement('i');
+			fill.style.width = p + '%';
+			const t = limTone(p);
+			if (t) fill.className = t;
+			bar.appendChild(fill);
+			const pc = Object.assign(document.createElement('span'), { className: 'pc', textContent: p + '%' + (inT ? ' · ' + inT : '') });
+			pc.title = inT ? 'resets in ' + inT : '';
+			g.append(nm, bar, pc);
+		}
+		m.body.appendChild(g);
+		const bits = [];
+		if (Lnow.note) bits.push(Lnow.note);
+		bits.push('from ' + (state.provider || 'the provider') + (Lnow.at ? ', ' + agoText(Lnow.at) : ''));
+		m.body.appendChild(Object.assign(document.createElement('div'), { className: 'limnote', textContent: bits.join(' · ') }));
+	};
+	draw();
+	const refresh = document.createElement('button');
+	refresh.type = 'button';
+	refresh.textContent = 'refresh';
+	refresh.addEventListener('click', async () => { refresh.disabled = true; try { await quietSlash(':usage ask'); } catch (e) {} setTimeout(() => { draw(); refresh.disabled = false; }, 900); });
+	const g = document.createElement('div'); g.className = 'grow';
+	m.foot.append(refresh, g, mb('done', 'primary', m.close));
+}
+function agoText(at) {
+	const s = Math.max(0, Math.round(Date.now() / 1000 - at));
+	return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : Math.floor(s / 3600) + 'h ago';
+}
+/* The phone's bottom bar: chat and code where the menu offers them (signed-in hosted),
+   which one is showing, and your picture. */
+function renderTabs() {
+	const chat = $('tab-chat'), code = $('tab-code'), you = $('tab-you');
+	if (!chat || !code || !you) return;
+	const modes = !$('modes').hidden;
+	chat.hidden = code.hidden = !modes;
+	$('tab-new').hidden = modes;      /* without chat and code (a computer's own page), new takes their place */
+	chat.classList.toggle('on', modes && !inCode());
+	code.classList.toggle('on', modes && inCode());
+	const a = you.querySelector('.avatar');
+	if (a) a.replaceWith(avatarEl());
 }
 /* Who is on this chat: each hako (ringed or filled by its name, a pulse while it
    works), and how many pages are open on it when that is more than this one. */
@@ -4987,6 +5208,12 @@ input.addEventListener('blur', () => setTimeout(() => { if (document.activeEleme
 $('burger').addEventListener('click', () => { if (narrow()) document.body.classList.toggle('nav'); else setSide(false); });
 $('btn-side').addEventListener('click', () => { if (narrow()) closeNav(); else setSide(true); });
 $('btn-dir').addEventListener('click', () => { closeNav(); openBrowser(); });
+$('tab-chat').addEventListener('click', () => { closeNav(); $('mode-chat').click(); });
+$('tab-code').addEventListener('click', () => { closeNav(); $('mode-code').click(); });
+$('tab-new').addEventListener('click', () => $('btn-new').click());
+$('tab-recents').addEventListener('click', () => document.body.classList.toggle('nav'));
+$('tab-files').addEventListener('click', () => { closeNav(); openBrowser(); });
+$('tab-you').addEventListener('click', (e) => { e.stopPropagation(); closeNav(); openUserMenu($('tab-you')); });
 $('btn-search').addEventListener('click', () => {
 	const box = $('searchbox');
 	box.hidden = !box.hidden;

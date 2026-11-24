@@ -71,6 +71,29 @@ with sync_playwright() as p:
     ck(pg.evaluate("$('log').scrollTop") < 400, "scrolled up to read, a new reply leaves the reader where they are")
     pg.evaluate("clearLog()"); pg.evaluate(feed, 11); pg.wait_for_timeout(100)
     ck(gap() < 40, "a reconnect (the chat cleared and replayed) rebuilds it at its end, not its top (%d px)" % gap())
+    # 11-23: the plan's usage as a ring (Claude's): the fullest window leads, a tap lists them all
+    ck(pg.locator('#usage').is_hidden(), "usage: no ring before the provider says anything")
+    now = int(time.time())
+    st = lambda L, t='limits': pg.evaluate("([L, t]) => esMessage({ data: JSON.stringify({ type: t, limits: L }) })", [L, t])
+    st({"main": 0, "note": "", "at": now, "windows": [{"name": "5h", "pct": 31, "reset": now + 7200}, {"name": "week", "pct": 5, "reset": now + 400000}]}, 'state')
+    pg.wait_for_timeout(100)
+    ck(pg.locator('#usage').is_visible() and pg.inner_text('#usage .n') == "31" and "5h" in pg.get_attribute('#usage', 'title'),
+       "usage: the ring shows the 5 hours while the week is low")
+    st({"main": 1, "note": "", "at": now, "windows": [{"name": "5h", "pct": 12, "reset": now + 7200}, {"name": "week", "pct": 93, "reset": now + 40000}]})
+    pg.wait_for_timeout(100)
+    ck(pg.inner_text('#usage .n') == "93" and "warn" in pg.get_attribute('#usage', 'class'), "usage: a week nearly gone leads, in the warning color")
+    pg.click('#usage'); pg.wait_for_timeout(150)
+    rows = pg.locator('.modal .lim .nm').all_inner_texts()
+    ck(rows == ["week", "5h"] and "11h" in pg.inner_text('.modal .lim'), f"usage: a tap lists every window, the headline first, with its reset ({rows})")
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
+    st({"main": 0, "note": "", "at": now, "windows": [{"name": "5h", "pct": 70, "reset": now - 5}, {"name": "week", "pct": 40, "reset": now + 40000}]})
+    pg.wait_for_timeout(100)
+    ck(pg.inner_text('#usage .n') == "40", "usage: a window past its reset gives way to the next fullest")
+    st({"main": -1, "note": "$4.21 left", "at": now, "windows": []})
+    pg.wait_for_timeout(100)
+    ck(pg.inner_text('#usage') == "$4.21 left", "usage: a prepaid key shows its balance")
+    st(None); pg.wait_for_timeout(100)
+    ck(pg.locator('#usage').is_hidden(), "usage: another sign-in with nothing to say clears the ring")
     # 11-18: mid-turn the button only stopped, so nothing could be said until the turn
     # ended, and :mode auto waited behind the approvals it was for. Posts recorded, not sent.
     pg.evaluate("""window.__posts = []; window.fetch = (p, o) => { if (o && o.method === "POST") __posts.push([p, o.body]); return Promise.resolve(new Response('{"ok":true}')); };
@@ -155,6 +178,7 @@ with sync_playwright() as p:
                 Object.defineProperty(window, 'visualViewport', { get: () => window.__vv, configurable: true });""")
         pg.goto(U); pg.wait_for_timeout(1500)
         ck(not errs, f"[{name}] page loads with no JS errors {errs[:2]}")
+        ck(pg.locator('#tabbar').is_visible() == (name == "phone"), f"[{name}] the tab bar is a phone's only")
         ck(pg.evaluate("document.documentElement.scrollWidth") <= vp['width'], f"[{name}] no sideways scroll")
         # a touch screen reacts to taps, not hovers: every :hover rule is for pointers only
         loose = pg.evaluate("""(() => { const out = [];
@@ -171,9 +195,12 @@ with sync_playwright() as p:
             pg.wait_for_timeout(200); kb = box()
             ck(kb[0] == 360 and kb[1] == 780 and kb[2] >= 760,
                f"[phone] with the keyboard open the page fills the visible box, composer at its foot over the keyboard (body {kb[0]}-{kb[1]}, form ends {kb[2]})")
+            ck(not pg.locator('#tabbar').is_visible(), "[phone] the tab bar steps aside while the keyboard is up")
             pg.evaluate("__vv.height = 844; __vv.offsetTop = 0; __vv.dispatchEvent(new Event('resize'))")
             pg.wait_for_timeout(200); shut = box()
-            ck(shut[0] == 0 and shut[1] == 844 and shut[2] >= 824, f"[phone] closing it puts the composer back at the bottom (body {shut[0]}-{shut[1]}, form ends {shut[2]})")
+            bar = pg.evaluate("Math.round($('tabbar').getBoundingClientRect().top)")
+            ck(shut[0] == 0 and shut[1] == 844 and abs(shut[2] - bar) <= 1 and bar >= 780,
+               f"[phone] closing it puts the composer back at the bottom, on the tab bar (body {shut[0]}-{shut[1]}, form ends {shut[2]}, bar at {bar})")
             # 10-28 on the iPhone: with the keyboard up, a swipe scrolled the DOCUMENT and the fixed
             # page stayed behind, the bar at the top with a keyboard's height of blank under it
             pg.evaluate("__vv.height = 420; __vv.offsetTop = 360; __vv.dispatchEvent(new Event('resize')); __vv.dispatchEvent(new Event('scroll'))")
@@ -196,8 +223,26 @@ with sync_playwright() as p:
                "[phone] the menu starts closed, the header shows the burger and the wordmark")
             pg.click('#burger'); pg.wait_for_timeout(350)
             ck(pg.locator('aside').is_visible() and pg.locator('#btn-new').is_visible(), "[phone] the burger opens the menu as a drawer")
+            bg = pg.evaluate("getComputedStyle(document.querySelector('aside')).backgroundColor")
+            ck(bg.startswith('rgb(') , f"[phone] the drawer is solid, the chat never shows through it ({bg})")
             pg.click('#btn-side'); pg.wait_for_timeout(350)
             ck(not pg.locator('aside').is_visible(), "[phone] its fold button closes it again")
+            # the bottom bar: a computer's own page has new, recents, files, you (chat and code are the hosted page's)
+            vis = pg.evaluate("[...document.querySelectorAll('#tabbar button')].filter((b) => b.offsetParent).map((b) => b.id)")
+            ck(vis == ['tab-new', 'tab-recents', 'tab-files', 'tab-you'], f"[phone] the tab bar offers new, recents, files, you ({vis})")
+            pg.click('#tab-recents'); pg.wait_for_timeout(350)
+            ck(pg.locator('aside').is_visible(), "[phone] recents in the tab bar opens the menu")
+            pg.click('#btn-side'); pg.wait_for_timeout(350)
+            pg.click('#tab-files'); pg.wait_for_timeout(500)
+            ck(pg.locator('.modal.sheet').is_visible(), "[phone] files in the tab bar opens the folder browser")
+            pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
+            pg.click('#tab-you'); pg.wait_for_timeout(300)
+            ck(pg.locator('.pop button', has_text='settings').is_visible(), "[phone] you in the tab bar offers profile and settings")
+            pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+            pg.evaluate("$('modes').hidden = false; renderTabs()")
+            vis = pg.evaluate("[...document.querySelectorAll('#tabbar button')].filter((b) => b.offsetParent).map((b) => b.id)")
+            ck(vis == ['tab-chat', 'tab-code', 'tab-recents', 'tab-files', 'tab-you'], f"[phone] signed in on the hosted page it offers chat and code in place of new ({vis})")
+            pg.evaluate("$('modes').hidden = true; renderTabs()")
             pg.click('#burger'); pg.wait_for_timeout(350); pg.click('#btn-new'); pg.wait_for_timeout(1200)
             ck(pg.locator('body.landing').count() == 1 and pg.locator('#greet').is_visible() and not pg.locator('aside').is_visible()
                and pg.evaluate("document.documentElement.scrollWidth") <= 390,
@@ -337,16 +382,38 @@ with sync_playwright() as p:
         ck(pg.locator('.pop button', has_text='settings').count() == 1 and pg.locator('.pop button', has_text='profile').count() == 1,
            "the user at the foot of the menu opens profile and settings")
         pg.locator('.pop button', has_text='settings').click(); pg.wait_for_timeout(500)
-        sw = pg.locator('.modal .swatch').count()
-        opts = pg.locator('.modal .opt:has(.swatch)')
-        ck(sw == 20 * 4 and "mithraeum" in opts.nth(0).inner_text() and "terminal" in opts.nth(1).inner_text()
+        tiles = pg.locator('.modal .tile')
+        ck(tiles.count() == 20 and tiles.nth(0).get_attribute('data-theme') == 'mithraeum' and tiles.nth(1).get_attribute('data-theme') == 'terminal'
            and pg.locator('.modal .grouplabel', has_text='light or dark').count() == 1,
-           f"settings list mithraeum first, terminal next, 20 themes with swatches, then light or dark ({sw // 4})")
+           f"settings show mithraeum first, terminal next, 20 themes as previews, then light or dark ({tiles.count()})")
         before = pg.inner_text('#log')
         for t in ('nord', 'washi', 'gruvbox'):
-            pg.locator('.modal .opt', has_text=t).first.click(); pg.wait_for_timeout(250)
-        ck(pg.locator('.modal').count() == 1 and "\u25ce gruvbox" in pg.inner_text('.modal'),
-           "tapping themes previews them in place, settings stays open")
+            pg.locator(f'.modal .tile[data-theme="{t}"]').click(); pg.wait_for_timeout(250)
+        ck(pg.locator('.modal').count() == 1 and pg.locator('.modal .tile.sel').get_attribute('data-theme') == 'gruvbox'
+           and pg.locator('.modal .tile.sel').count() == 1,
+           "tapping themes previews them in place, settings stays open, one marked")
+        # compact: light or dark, a background and an indicator are each one line of choices; grain and voice are switches
+        pg.locator('.modal .seg button[data-k="dark"]').click(); pg.wait_for_timeout(150)
+        ck(pg.evaluate("settings.appearance") == 'dark' and pg.locator('.modal .seg button.sel[data-k="dark"]').count() == 1, "light or dark is one line, a tap picks")
+        pg.locator('.modal .seg button[data-k="auto"]').click()
+        pg.locator('.modal .seg button[data-k="rays"]').click(); pg.wait_for_timeout(150)
+        ck(pg.evaluate("$('backdrop').dataset.bg") == 'rays', "a background is one tap")
+        pg.locator('.modal .seg button[data-k="none"]').first.click()
+        g = pg.locator('.modal .swrow', has_text='paper grain')
+        g.click(); pg.wait_for_timeout(100)
+        ck(g.get_attribute('aria-checked') == 'false' and not pg.evaluate("document.body.classList.contains('grain')"), "paper grain is a switch")
+        g.click()
+        pg.locator('.modal .stabs button[data-k="hako"]').click()
+        pg.locator('.modal .seg button[data-k="moon"]').click()
+        ck(pg.evaluate("settings.spinner") == 'moon' and pg.locator('.modal').count() == 1, "the thinking indicator is one tap and settings stays open")
+        pg.locator('.modal .stabs button[data-k="look"]').click()
+        pg.locator('.modal .stabs button[data-k="hako"]').click(); pg.wait_for_timeout(150)
+        ck(pg.locator('.modal [data-pane="hako"]').is_visible() and not pg.locator('.modal [data-pane="look"]').is_visible()
+           and "hako-sho" in pg.inner_text('.modal [data-pane="hako"]'), "settings has tabs: hako holds the model, look hides")
+        pg.locator('.modal .seg button[data-k="braille"]').click()
+        pg.locator('.modal .stabs button[data-k="data"]').click(); pg.wait_for_timeout(150)
+        ck("forget settings" in pg.inner_text('.modal [data-pane="data"]'), "and your data holds what is kept and the forget button")
+        pg.locator('.modal .stabs button[data-k="look"]').click()
         pg.keyboard.press('Escape'); pg.wait_for_timeout(1200)
         if os.environ.get("DEBUG"):
             import difflib; a = pg.inner_text('#log')
