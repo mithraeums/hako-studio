@@ -39,6 +39,7 @@ global.document = {
 };
 global.window = { matchMedia: () => ({ matches: false }), visualViewport: null, innerHeight: 800,
                   addEventListener(){} };
+global.innerWidth = 1280; global.innerHeight = 800;    /* a popup menu places itself by them */
 global.localStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 global.sessionStorage = { getItem: () => null, setItem(){}, removeItem(){} };
 global.fetch = async () => ({ json: async () => ({}), ok: true });
