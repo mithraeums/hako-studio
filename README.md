@@ -149,7 +149,8 @@
   your computers, one per shared folder, and opening one turns the page into that session.
   Every byte is sealed in the tab (Noise, by `hako.wasm`) and opened only by your computer; the
   relay in between routes ciphertext and keeps no chats. Details below.
-- **Works on a phone.** Drawer navigation, touch targets, keyboard-aware layout, add-to-home-screen.
+- **Works on a phone.** A tab bar where a thumb goes, a composer that holds + and the model with a
+  round send, touch targets, keyboard-aware layout, add-to-home-screen.
   Serve it from the machine you are sitting at and drive it from the couch, or open the hosted
   page and let the agent run on the phone itself.
 - **Nothing to install.** libc and pthread. No framework, no CDN, no build step for the page.

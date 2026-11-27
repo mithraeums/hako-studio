@@ -459,6 +459,7 @@
 	.attach { font-size: 18px; line-height: 1; width: 32px; height: 30px; padding: 0; color: var(--dim); border-color: transparent; border-radius: 8px; }
 	@media (hover: hover) { .attach:hover { color: var(--gold); background: var(--panel-2); border-color: transparent; } }
 	#send { border-radius: 9px; padding: .3rem .8rem; }
+	.cmodel { display: none; }
 	/* Attachments sit on top of the field, as chips you can drop one by one. */
 	.tray { display: flex; flex-wrap: wrap; gap: .35rem; padding: .55rem .6rem 0; }
 	.chip {
@@ -717,6 +718,27 @@
 		.modal { width: 100%; max-height: min(88dvh, 100%); }
 		.scrim { padding: .5rem; align-items: flex-end; }
 		body.kb .pills { display: none; }
+		/* the box on a phone: + and the model at the left, send a round arrow at the right,
+		   lifted off the chat; the pill row under it keeps the folder, hakos and mode */
+		.cbox { border-radius: 20px; box-shadow: 0 6px 24px rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.12); }
+		textarea { padding: .7rem .95rem .1rem; min-height: 2.6rem; }
+		.crow { padding: .2rem .4rem .4rem; gap: .2rem; }
+		.cmodel:not([hidden]) {
+			display: inline-flex; align-items: center; min-height: 0; height: 30px; max-width: 46vw; padding: 0 .6rem;
+			border: 0; border-radius: 15px; background: none; color: var(--dim); font-size: 13px;
+			overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+		}
+		.cmodel:not([hidden])::after { content: '\2304'; margin-left: .3rem; font-size: 11px; position: relative; top: -2px; }
+		.cmodel:active { background: var(--panel-2); }
+		.pills .p-model { display: none; }
+		#send {
+			min-height: 0; width: 34px; height: 34px; padding: 0; border-radius: 50%;
+			font-size: 0; display: inline-flex; align-items: center; justify-content: center;
+		}
+		#send::before { content: '\2191'; font-size: 19px; font-weight: 600; line-height: 1; }
+		#send[data-act="stop"]::before { content: ''; width: 11px; height: 11px; border-radius: 2px; background: currentColor; }
+		#send[data-act="queue"]::before { content: '\21B3'; font-size: 17px; }
+		#send[data-act="wait"]::before { content: '\2026'; font-size: 17px; }
 		/* the keyboard is up on the landing: the composer sits on it, the greeting above */
 		body.kb.landing .below { display: none; }
 		body.kb.landing .hello { padding-bottom: .8rem; }
@@ -785,6 +807,7 @@
 				<textarea id="input" rows="1" placeholder="ask anything; : or / for commands" autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="message"></textarea>
 				<div class="crow">
 					<button id="attach" type="button" class="attach" title="attach a file" aria-label="attach a file">+</button>
+					<button id="cmodel" type="button" class="cmodel" hidden></button>
 					<span class="grow"></span>
 					<button class="primary" id="send" type="submit">send</button>
 				</div>
@@ -3004,6 +3027,7 @@ function syncSend() {
 	const t = input.value.trim(), typed = busy && !!t;
 	send.disabled = busy && !typed && !caps.has('stop');
 	send.textContent = !busy ? 'send' : typed ? (/^[:/]/.test(t) ? 'send' : 'queue') : caps.has('stop') ? 'stop' : '…';
+	send.dataset.act = send.textContent === '…' ? 'wait' : send.textContent;
 }
 
 /* Said while a turn runs: held on this page, then sent as one message when the
@@ -4746,6 +4770,7 @@ function renderPills() {
 	const el = $('pills');
 	if (!el) return;
 	el.textContent = '';
+	if ($('cmodel')) $('cmodel').hidden = true;
 	if (codeLanding()) {
 		const c = codeList.find((x) => x.id === codePick);
 		if (c) el.append(pill('device', c.host, c.dir || c.host), pill('folder', c.name, c.dir));
@@ -4753,8 +4778,17 @@ function renderPills() {
 	}
 	const folder = state.folder || (state.dir ? state.dir.split('/').filter(Boolean).pop() : '') || '';
 	el.appendChild(pill('folder', folder || 'no folder', state.dir || 'pick a folder', () => { closeNav(); openBrowser(); }));
-	el.appendChild(pill('model', state.model || (state.provider && state.provider !== 'none' ? state.provider : 'pick a model'),
-		(state.provider || 'no provider') + (state.model ? ' / ' + state.model : ''), () => openModelPicker()));
+	const mname = state.model || (state.provider && state.provider !== 'none' ? state.provider : 'pick a model');
+	const mp = pill('model', mname, (state.provider || 'no provider') + (state.model ? ' / ' + state.model : ''), () => openModelPicker());
+	mp.classList.add('p-model');
+	el.appendChild(mp);
+	const cm = $('cmodel');
+	if (cm) {
+		cm.hidden = false;
+		cm.title = mp.title;
+		cm.textContent = mname.replace(/^(claude|gpt|hako)-/, '');   /* short: the row is a thumb wide */
+		cm.setAttribute('aria-label', 'model: ' + mname);
+	}
 	if (agentsNow.agents.length > 1) {
 		const names = agentsNow.agents.map((a) => a.name + (a.state === 'busy' ? ' (working)' : '')).join(', ');
 		el.appendChild(pill('agents', agentsNow.agents.length + ' hakos', 'on this session: ' + names, openAgents));
@@ -5242,6 +5276,7 @@ devicePicker.addEventListener('change', () => {
 });
 document.body.appendChild(devicePicker);
 $('attach').addEventListener('click', () => devicePicker.click());
+$('cmodel').addEventListener('click', () => openModelPicker());
 /* A pasted screenshot or a dropped file lands on the tray like a picked one.
    Pasted images are all called image.png, so each gets its own name. */
 input.addEventListener('paste', (e) => {

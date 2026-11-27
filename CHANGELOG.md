@@ -11,6 +11,8 @@ embedded in `hako --serve`. The agent itself is hako-code; its changes are in th
 - a bar along the bottom on a phone, where a thumb goes: chat and code (signed in), recents, files and you; on a computer's own page new takes the place of chat and code. it steps aside while the keyboard is up, and the menu still has everything
 - settings in three tabs (look, hako, your data) at one height: themes are a grid of small previews in their own colors (four across on a phone), light or dark, a background and the thinking indicator are one line of choices each, paper grain and reading aloud are switches. the look tab fits a phone screen without a scroll
 
+- a tighter composer on a phone: the box is lifted off the chat, + and the model sit in it (a tap picks another), send is a round arrow (a square to stop); the folder, hakos and mode stay under it
+
 ### fixed
 - the menu on a phone let the page show through it (the see-through panel meant for backgrounds); it is solid as a drawer
 
