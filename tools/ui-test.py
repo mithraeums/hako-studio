@@ -148,6 +148,16 @@ with sync_playwright() as p:
     pg.evaluate("agentsNow = { me: 'sho', route: '', agents: [{ name: 'sho', me: true, state: 'busy' }, { name: 'koi' }] }; state.watching = 3; renderPresence()")
     ck(pg.locator('#presence .av').count() == 2 and pg.locator('#presence .av.busy').count() == 1 and '3 open' in pg.inner_text('#presence'),
        "the header shows who is on the chat, who is working, and how many pages are open")
+    pg.evaluate("""() => { agentsNow = { me: 'sho', route: '', agents: [{ name: 'sho', me: true, provider: 'mithraeum', model: 'hako-sho' },
+        { name: 'claude', provider: 'nous', model: 'anthropic/claude-haiku-5.5' }, { name: 'gpt', provider: 'chatgpt', model: 'gpt-6-luna' },
+        { name: 'x', provider: 'somewhere', model: 'claude-haiku-5-5' }] };
+        for (const by of ['sho', 'claude', 'gpt', 'x', 'nobody']) esMessage({ data: JSON.stringify({ type: 'message', role: 'ai', by, text: 'hi' }) }) }""")
+    marks = pg.evaluate("[...document.querySelectorAll('#log .model .who .av')].slice(-5).map((v) => v.dataset.mark || '')")
+    ck(marks == ['hako', 'nous', 'openai', '', ''],
+       "each reply wears its provider's mark: Claude through Nous shows Nous, a ChatGPT sign-in OpenAI (%r)" % marks)
+    ck(pg.evaluate("[...document.querySelectorAll('#log .model .who .av svg')].every((s) => getComputedStyle(s).fill !== 'none')")
+       and pg.locator('#log .model .who .av:not(.logo) b').count() >= 1,
+       "the mark is drawn in the theme's color, an unknown model keeps its initial")
     pg.evaluate("settings.backdrop = 'stars'; paintBackdrop()")
     ck(pg.evaluate("$('backdrop').dataset.bg") == 'stars' and pg.evaluate("document.body.classList.contains('grain')"), "a background is drawn, grain on by default")
     pg.evaluate("settings.grain = false; settings.backdrop = 'image'; paintBackdrop()")

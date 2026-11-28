@@ -142,6 +142,8 @@
 - **What is left of your plan.** A ring in the header with the fullest limit your provider
   reports: the week when it is nearly gone, the 5 hours otherwise. Tap it for every window and
   when each resets; a prepaid key shows its balance.
+- **Who said it.** Each reply wears its provider's logo (Anthropic, OpenAI, Nous, OpenRouter,
+  Copilot and more, hako's own for a local model), drawn in the theme's color.
 - **Read aloud.** A speaker on every reply, or `:voice on` to hear each one. Only the device's own
   voices are used, so the text never leaves it.
 - **Your code sessions, from anywhere** *(invite beta)*. Run `:remote on` in a terminal hako
