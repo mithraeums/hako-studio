@@ -394,11 +394,31 @@ with sync_playwright() as p:
     ck("2 hakos" in pg.evaluate(pills), "agents: once it joins, the page says two hakos are on the session (%r)" % pg.evaluate(pills))
     pg.fill('#input', '@'); pg.dispatch_event('#input', 'input'); pg.wait_for_timeout(1200)
     ck(pg.locator('#cmdmenu .cmd .n').all_inner_texts() == ['@sho2'], "agents: @ completes the other hako, and only it (%r)" % pg.locator('#cmdmenu .cmd .n').all_inner_texts())
+    ROWS = ("[...document.querySelectorAll('#log > *')].filter((e) => e.innerText.includes('Okay, here is'))"
+            ".map((e) => (e.querySelector('.who') || {}).innerText || e.className)")
+    rows0 = len(pg.evaluate(ROWS))
     pg.fill('#input', '@sho2 TELL from the page'); pg.click('#send')
-    try: pg.wait_for_function("document.getElementById('log').innerText.includes('sho2: Okay')", timeout=25000)
+    try: pg.wait_for_function("%s.length > %d" % (ROWS, rows0), timeout=25000)
     except Exception: pass
-    ck(b"[from sho] TELL from the page" in seen3[0] and "sho2: Okay" in pg.inner_text('#log'),
-       "agents: @sho2 from the page runs on the other hako, and its answer shows here")
+    pg.wait_for_timeout(1500)
+    rows = pg.evaluate(ROWS)[rows0:]
+    told = [l for l in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", seen3[0]).decode(errors="replace").splitlines() if "TELL" in l]
+    ck(any("TELL from the page" in l for l in told) and any("sho2" in r.lower() for r in rows),
+       "agents: @sho2 from the page runs on the other hako, and its answer shows here (%r, %r)" % (rows, told[-2:]))
+    # 11-25: each line another hako wrote came twice, its row and a grey "sho2: ..." note
+    ck(len(rows) == 1, "agents: and once, as its row, without the terminal's note of it (%r)" % rows)
+    # 11-25 on the iPhone, two hakos on one chat: the page kept "thinking" with a stop
+    # button after a turn ended. An @name line (above) was echoed to the page as a turn
+    # and never got its "done", so the page stayed busy into this one
+    n0 = pg.locator('.turn.model').count()
+    pg.fill('#input', 'hello with two here'); pg.click('#send')
+    try: pg.wait_for_function("document.querySelectorAll('.turn.model').length > %d" % n0, timeout=20000)
+    except Exception: pass
+    t0 = time.time()
+    while time.time() - t0 < 20 and (pg.locator('.thinking').count() or pg.inner_text('#send').strip() != 'send'):
+        pg.wait_for_timeout(100)
+    lag = time.time() - t0
+    ck(lag < 3, "agents: with two hakos on, the turn's end reaches the page at once (%.1fs after its answer)" % lag)
     os.write(fd3, b":q\r"); time.sleep(1.0)
     os.write(fd2, b":remote off\r"); time.sleep(2.0)
     pg.evaluate("window.hakoAccount.show(true)"); pg.wait_for_timeout(1500)

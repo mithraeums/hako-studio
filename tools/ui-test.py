@@ -148,6 +148,16 @@ with sync_playwright() as p:
     pg.evaluate("agentsNow = { me: 'sho', route: '', agents: [{ name: 'sho', me: true, state: 'busy' }, { name: 'koi' }] }; state.watching = 3; renderPresence()")
     ck(pg.locator('#presence .av').count() == 2 and pg.locator('#presence .av.busy').count() == 1 and '3 open' in pg.inner_text('#presence'),
        "the header shows who is on the chat, who is working, and how many pages are open")
+    pg.evaluate("""() => { agentsNow = { me: 'sho', route: '', agents: [{ name: 'sho', me: true, provider: 'mithraeum', model: 'hako-sho' },
+        { name: 'claude', provider: 'nous', model: 'anthropic/claude-haiku-5.5' }, { name: 'gpt', provider: 'chatgpt', model: 'gpt-6-luna' },
+        { name: 'x', provider: 'somewhere', model: 'claude-haiku-5-5' }] };
+        for (const by of ['sho', 'claude', 'gpt', 'x', 'nobody']) esMessage({ data: JSON.stringify({ type: 'message', role: 'ai', by, text: 'hi' }) }) }""")
+    marks = pg.evaluate("[...document.querySelectorAll('#log .model .who .av')].slice(-5).map((v) => v.dataset.mark || '')")
+    ck(marks == ['hako', 'nous', 'openai', '', ''],
+       "each reply wears its provider's mark: Claude through Nous shows Nous, a ChatGPT sign-in OpenAI (%r)" % marks)
+    ck(pg.evaluate("[...document.querySelectorAll('#log .model .who .av svg')].every((s) => getComputedStyle(s).fill !== 'none')")
+       and pg.locator('#log .model .who .av:not(.logo) b').count() >= 1,
+       "the mark is drawn in the theme's color, an unknown model keeps its initial")
     pg.evaluate("settings.backdrop = 'stars'; paintBackdrop()")
     ck(pg.evaluate("$('backdrop').dataset.bg") == 'stars' and pg.evaluate("document.body.classList.contains('grain')"), "a background is drawn, grain on by default")
     pg.evaluate("settings.grain = false; settings.backdrop = 'image'; paintBackdrop()")
@@ -179,6 +189,7 @@ with sync_playwright() as p:
         pg.goto(U); pg.wait_for_timeout(1500)
         ck(not errs, f"[{name}] page loads with no JS errors {errs[:2]}")
         ck(pg.locator('#tabbar').is_visible() == (name == "phone"), f"[{name}] the tab bar is a phone's only")
+        ck(pg.locator('#cmodel').is_visible() == (name == "phone"), f"[{name}] the model sits in the box on a phone only (the pill row has it on a desk)")
         ck(pg.evaluate("document.documentElement.scrollWidth") <= vp['width'], f"[{name}] no sideways scroll")
         # a touch screen reacts to taps, not hovers: every :hover rule is for pointers only
         loose = pg.evaluate("""(() => { const out = [];
@@ -196,6 +207,12 @@ with sync_playwright() as p:
             ck(kb[0] == 360 and kb[1] == 780 and kb[2] >= 760,
                f"[phone] with the keyboard open the page fills the visible box, composer at its foot over the keyboard (body {kb[0]}-{kb[1]}, form ends {kb[2]})")
             ck(not pg.locator('#tabbar').is_visible(), "[phone] the tab bar steps aside while the keyboard is up")
+            # 11-26 (the user, typing on the iPhone): tighter, like Claude's: + and the model in the box, send a round arrow
+            row = pg.evaluate("""(() => { const v = (e) => !!(e && e.offsetParent); const m = $('cmodel'), s = $('send');
+                return [v($('attach')), v(m), m.textContent, v(document.querySelector('#pills .p-model')),
+                        Math.round(s.getBoundingClientRect().width), s.textContent, s.dataset.act]; })()""")
+            ck(row[0] and row[1] and row[2] and not row[3] and row[4] <= 40 and row[5] == 'send' and row[6] == 'send',
+               "[phone] typing: the box holds + and the model, send is a round arrow (the word kept for readers) %r" % row)
             pg.evaluate("__vv.height = 844; __vv.offsetTop = 0; __vv.dispatchEvent(new Event('resize'))")
             pg.wait_for_timeout(200); shut = box()
             bar = pg.evaluate("Math.round($('tabbar').getBoundingClientRect().top)")

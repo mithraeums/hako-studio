@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.2.1-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.1"/>
+  <img src="https://img.shields.io/badge/version-v0.2.2-ece7da?style=flat-square&labelColor=14130f" alt="v0.2.2"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-ece7da?style=flat-square&labelColor=14130f" alt="GPL-3.0"/>
   <img src="https://img.shields.io/badge/UI-single%20file-ece7da?style=flat-square&labelColor=14130f" alt="single file UI"/>
   <img src="https://img.shields.io/badge/deps-none-ece7da?style=flat-square&labelColor=14130f" alt="no dependencies"/>
@@ -142,6 +142,8 @@
 - **What is left of your plan.** A ring in the header with the fullest limit your provider
   reports: the week when it is nearly gone, the 5 hours otherwise. Tap it for every window and
   when each resets; a prepaid key shows its balance.
+- **Who said it.** Each reply wears its provider's logo (Anthropic, OpenAI, Nous, OpenRouter,
+  Copilot and more, hako's own for a local model), drawn in the theme's color.
 - **Read aloud.** A speaker on every reply, or `:voice on` to hear each one. Only the device's own
   voices are used, so the text never leaves it.
 - **Your code sessions, from anywhere** *(invite beta)*. Run `:remote on` in a terminal hako
@@ -149,7 +151,8 @@
   your computers, one per shared folder, and opening one turns the page into that session.
   Every byte is sealed in the tab (Noise, by `hako.wasm`) and opened only by your computer; the
   relay in between routes ciphertext and keeps no chats. Details below.
-- **Works on a phone.** Drawer navigation, touch targets, keyboard-aware layout, add-to-home-screen.
+- **Works on a phone.** A tab bar where a thumb goes, a composer that holds + and the model with a
+  round send, touch targets, keyboard-aware layout, add-to-home-screen.
   Serve it from the machine you are sitting at and drive it from the couch, or open the hosted
   page and let the agent run on the phone itself.
 - **Nothing to install.** libc and pthread. No framework, no CDN, no build step for the page.
